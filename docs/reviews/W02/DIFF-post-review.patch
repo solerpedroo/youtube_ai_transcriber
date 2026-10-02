@@ -1,0 +1,110 @@
+diff --git a/src/app/api/youtube/metadata/route.ts b/src/app/api/youtube/metadata/route.ts
+index 532fa83..284b8d2 100644
+--- a/src/app/api/youtube/metadata/route.ts
++++ b/src/app/api/youtube/metadata/route.ts
+@@ -8,8 +8,15 @@ export const runtime = "nodejs";
+ const RequestSchema = z.object({ url: z.string().trim().min(1).max(2_048) });
+ 
+ export async function POST(request: Request) {
++  let payload: unknown;
+   try {
+-    const body = RequestSchema.safeParse(await request.json());
++    payload = await request.json();
++  } catch {
++    return NextResponse.json({ code: "INVALID_URL", message: "Envie um corpo JSON válido." }, { status: 400 });
++  }
++
++  try {
++    const body = RequestSchema.safeParse(payload);
+     if (!body.success) {
+       return NextResponse.json({ code: "INVALID_URL", message: "Informe uma URL válida do YouTube." }, { status: 400 });
+     }
+diff --git a/src/lib/youtube/metadata.ts b/src/lib/youtube/metadata.ts
+index d2098da..35fb832 100644
+--- a/src/lib/youtube/metadata.ts
++++ b/src/lib/youtube/metadata.ts
+@@ -25,7 +25,9 @@ export function normalizeVideoMetadata(payload: unknown, fallbackUrl: string): V
+     channel: parsed.data.channel ?? parsed.data.uploader,
+     duration: parsed.data.duration,
+     thumbnail: parsed.data.thumbnail,
+-    url: parsed.data.webpage_url ?? fallbackUrl,
++    url: parsed.data.webpage_url && YouTubeUrlSchema.safeParse(parsed.data.webpage_url).success
++      ? YouTubeUrlSchema.parse(parsed.data.webpage_url).url
++      : fallbackUrl,
+   };
+ }
+ 
+diff --git a/src/lib/youtube/temp.test.ts b/src/lib/youtube/temp.test.ts
+index db272ac..cb4baa8 100644
+--- a/src/lib/youtube/temp.test.ts
++++ b/src/lib/youtube/temp.test.ts
+@@ -1,4 +1,5 @@
+ import { access, writeFile } from "node:fs/promises";
++import { tmpdir } from "node:os";
+ import { describe, expect, it } from "vitest";
+ import { createJobDirectory, removeJobDirectory } from "./temp";
+ 
+@@ -7,7 +8,11 @@ describe("temporary job directories", () => {
+     const directory = await createJobDirectory();
+     const filePath = `${directory}/metadata.json`;
+     await writeFile(filePath, "{}", "utf8");
+-    await removeJobDirectory(directory);
++    await expect(removeJobDirectory(directory)).resolves.toBe(true);
+     await expect(access(filePath)).rejects.toThrow();
+   });
++
++  it("refuses to delete a path outside its temporary namespace", async () => {
++    await expect(removeJobDirectory(tmpdir())).resolves.toBe(false);
++  });
+ });
+diff --git a/src/lib/youtube/temp.ts b/src/lib/youtube/temp.ts
+index 2ac0ffc..7dc8f0e 100644
+--- a/src/lib/youtube/temp.ts
++++ b/src/lib/youtube/temp.ts
+@@ -1,6 +1,6 @@
+ import { mkdtemp, rm } from "node:fs/promises";
+ import { tmpdir } from "node:os";
+-import { join } from "node:path";
++import { join, resolve, sep } from "node:path";
+ 
+ const TEMP_PREFIX = "youtube-ai-";
+ 
+@@ -8,7 +8,19 @@ export async function createJobDirectory(): Promise<string> {
+   return mkdtemp(join(tmpdir(), TEMP_PREFIX));
+ }
+ 
+-/** Always call from a finally block; cleanup failure must not mask the original error. */
+-export async function removeJobDirectory(jobDirectory: string): Promise<void> {
+-  await rm(jobDirectory, { recursive: true, force: true });
++/** Safe for finally blocks: refuses unsafe paths and reports cleanup failure without throwing. */
++export async function removeJobDirectory(jobDirectory: string): Promise<boolean> {
++  const expectedPrefix = `${resolve(tmpdir())}${sep}${TEMP_PREFIX}`;
++  const resolvedDirectory = resolve(jobDirectory);
++  const comparableDirectory = process.platform === "win32" ? resolvedDirectory.toLowerCase() : resolvedDirectory;
++  const comparablePrefix = process.platform === "win32" ? expectedPrefix.toLowerCase() : expectedPrefix;
++  if (!comparableDirectory.startsWith(comparablePrefix)) {
++    return false;
++  }
++  try {
++    await rm(resolvedDirectory, { recursive: true, force: true });
++    return true;
++  } catch {
++    return false;
++  }
+ }
+diff --git a/src/lib/youtube/url.test.ts b/src/lib/youtube/url.test.ts
+index 82bb934..5dcd521 100644
+--- a/src/lib/youtube/url.test.ts
++++ b/src/lib/youtube/url.test.ts
+@@ -44,4 +44,11 @@ describe("normalizeVideoMetadata", () => {
+       url: "https://www.youtube.com/watch?v=dQw4w9WgXcQ",
+     });
+   });
++
++  it("does not expose a canonical URL outside the YouTube allowlist", () => {
++    expect(normalizeVideoMetadata({
++      id: "dQw4w9WgXcQ", title: "A video", duration: 212,
++      webpage_url: "https://example.com/redirect",
++    }, "https://www.youtube.com/watch?v=dQw4w9WgXcQ").url).toBe("https://www.youtube.com/watch?v=dQw4w9WgXcQ");
++  });
+ });
