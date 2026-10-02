@@ -29,7 +29,7 @@ const RequestSchema = z.object({
   baseUrl: z.string().trim().url().optional(),
   videoTitle: z.string().trim().max(500).optional().default("Untitled video"),
   transcriptText: z.string().max(100_000).optional(),
-  transcriptSegments: z.array(TranscriptSegmentSchema).max(8_000).optional(),
+  transcriptSegments: z.array(TranscriptSegmentSchema).max(50_000).optional(),
   messages: z.array(ChatMessageSchema).min(1).max(40),
 }).superRefine((value, context) => {
   if (value.provider === "openai-compatible" && !value.baseUrl) {
