@@ -8,8 +8,15 @@ export const runtime = "nodejs";
 const RequestSchema = z.object({ url: z.string().trim().min(1).max(2_048) });
 
 export async function POST(request: Request) {
+  let payload: unknown;
   try {
-    const body = RequestSchema.safeParse(await request.json());
+    payload = await request.json();
+  } catch {
+    return NextResponse.json({ code: "INVALID_URL", message: "Envie um corpo JSON válido." }, { status: 400 });
+  }
+
+  try {
+    const body = RequestSchema.safeParse(payload);
     if (!body.success) {
       return NextResponse.json({ code: "INVALID_URL", message: "Informe uma URL válida do YouTube." }, { status: 400 });
     }
