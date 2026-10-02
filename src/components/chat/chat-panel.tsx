@@ -101,13 +101,16 @@ export function ChatPanel({ project, onSeek }: ChatPanelProps) {
           model: chatProvider.model,
           baseUrl: chatProvider.baseUrl,
           videoTitle: project.metadata.title,
-          transcriptText: project.transcript.fullText,
-          transcriptSegments: project.transcript.segments.map((segment) => ({
-            id: segment.id,
-            start: segment.start,
-            end: segment.end,
-            text: segment.text,
-          })),
+          ...(project.transcript.segments.length > 0
+            ? {
+                transcriptSegments: project.transcript.segments.map((segment) => ({
+                  id: segment.id,
+                  start: segment.start,
+                  end: segment.end,
+                  text: segment.text,
+                })),
+              }
+            : { transcriptText: project.transcript.fullText }),
           messages: history.map((message) => ({ role: message.role, content: message.content })),
         }),
       });
