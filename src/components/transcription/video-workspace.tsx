@@ -2,14 +2,10 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
-import {
-  LoaderCircle,
-  MessageSquareText,
-  Subtitles,
-  WandSparkles,
-} from "lucide-react";
+import { LoaderCircle, WandSparkles } from "lucide-react";
 import type { Transcript, VideoProject } from "@/types";
 import type { TranscriptionProgressEvent } from "@/lib/transcription/types";
+import { ChatPanel } from "@/components/chat/chat-panel";
 import { PhaseNotice } from "@/components/foundation/phase-notice";
 import { AppShell } from "@/components/layout/app-shell";
 import { TranscriptView } from "@/components/transcript/transcript-view";
@@ -268,26 +264,19 @@ export function VideoWorkspace({ projectId }: { projectId: string }) {
           </div>
         </section>
 
-        <aside className={`rounded-2xl border border-zinc-200 bg-white p-5 shadow-sm dark:border-zinc-800 dark:bg-zinc-900 ${tab === "chat" ? "block" : "hidden lg:block"}`}>
-          <div className="flex items-center gap-2">
-            <MessageSquareText className="size-4 text-violet-600 dark:text-violet-400" />
-            <h2 className="font-semibold">Assistente de IA</h2>
-          </div>
-          <div className="mt-5 flex min-h-72 flex-col items-center justify-center text-center">
-            <span className="grid size-10 place-items-center rounded-xl bg-zinc-100 text-zinc-500 dark:bg-zinc-800">
-              <Subtitles className="size-5" />
-            </span>
-            <p className="mt-4 text-sm font-medium">Pergunte qualquer coisa sobre este vídeo.</p>
-            <p className="mt-2 text-sm leading-6 text-zinc-500">
-              O chat será liberado na Fase 6, após um provedor de chat configurado.
-            </p>
-          </div>
+        <aside
+          id="workspace-panel-chat"
+          role="tabpanel"
+          aria-labelledby="workspace-tab-chat"
+          className={`rounded-2xl border border-zinc-200 bg-white p-5 shadow-sm dark:border-zinc-800 dark:bg-zinc-900 ${tab === "chat" ? "block" : "hidden lg:block"}`}
+        >
+          <ChatPanel project={project} />
         </aside>
       </div>
 
       <div className="mt-6">
         <PhaseNotice>
-          Fase 5: player, seek por timestamp, busca, cópia e exportações. O chat chega na Fase 6.
+          Fase 6: chat com streaming via provedores de IA. A recuperação avançada por trechos chega na Fase 7.
         </PhaseNotice>
       </div>
     </AppShell>
