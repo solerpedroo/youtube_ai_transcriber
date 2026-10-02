@@ -1,0 +1,598 @@
+diff --git a/docs/STATUS.md b/docs/STATUS.md
+index 99cc654..144695b 100644
+--- a/docs/STATUS.md
++++ b/docs/STATUS.md
+@@ -1,8 +1,8 @@
+ # Status do projeto
+ 
+-- Wave: W08 — Private YouTube (Fase 8)
+-- State: complete
++- Wave: W09 — Polish (Fase 9)
++- State: in_progress
+ - Last completed: W08 — Private YouTube (Fase 8)
+-- Next action: W09 — Polish (tema, estados, responsivo, a11y).
++- Next action: W09 — tema, estados, responsivo, a11y e teste de provedor.
+ - Last review: docs/reviews/W08/REVIEW.md
+ - Updated: 2026-10-02
+diff --git a/src/app/globals.css b/src/app/globals.css
+index 74d2abe..bb75136 100644
+--- a/src/app/globals.css
++++ b/src/app/globals.css
+@@ -127,4 +127,7 @@
+   html {
+     @apply font-sans;
+   }
++  :focus-visible {
++    @apply outline-2 outline-offset-2 outline-violet-500;
++  }
+ }
+diff --git a/src/app/layout.tsx b/src/app/layout.tsx
+index 62b9947..0407a19 100644
+--- a/src/app/layout.tsx
++++ b/src/app/layout.tsx
+@@ -1,6 +1,7 @@
+ import type { Metadata } from "next";
+ import { Geist, Geist_Mono } from "next/font/google";
+ import { AppProviders } from "@/components/providers/app-providers";
++import { THEME_BOOTSTRAP_SCRIPT } from "@/lib/theme/theme-bootstrap";
+ import "./globals.css";
+ 
+ const geistSans = Geist({
+@@ -25,9 +26,15 @@ export default function RootLayout({ children }: LayoutProps<"/">) {
+   return (
+     <html
+       lang="pt-BR"
++      suppressHydrationWarning
+       className={`${geistSans.variable} ${geistMono.variable} h-full antialiased`}
+     >
+-      <body className="min-h-full flex flex-col"><AppProviders>{children}</AppProviders></body>
++      <head>
++        <script dangerouslySetInnerHTML={{ __html: THEME_BOOTSTRAP_SCRIPT }} />
++      </head>
++      <body className="flex min-h-full flex-col">
++        <AppProviders>{children}</AppProviders>
++      </body>
+     </html>
+   );
+ }
+diff --git a/src/app/settings/page.tsx b/src/app/settings/page.tsx
+index 731a885..12d161f 100644
+--- a/src/app/settings/page.tsx
++++ b/src/app/settings/page.tsx
+@@ -1,3 +1,4 @@
++import { AppearanceForm } from "@/components/settings/appearance-form";
+ import { ChatSettingsForm } from "@/components/settings/chat-settings-form";
+ import { TranscriptionSettingsForm } from "@/components/settings/transcription-settings-form";
+ import { YoutubeAccessForm } from "@/components/settings/youtube-access-form";
+@@ -64,16 +65,20 @@ export default function SettingsPage() {
+             </div>
+           </section>
+ 
+-          <section className="flex gap-4 p-5">
+-            <span className="grid size-9 shrink-0 place-items-center rounded-lg bg-zinc-100 text-zinc-600 dark:bg-zinc-800 dark:text-zinc-300">
+-              <Monitor className="size-4" />
+-            </span>
+-            <div>
+-              <h2 className="font-medium">Aparência</h2>
+-              <p className="mt-1 text-sm leading-6 text-zinc-600 dark:text-zinc-400">
+-                Escolha entre tema claro, escuro ou do sistema.
+-              </p>
+-              <span className="mt-2 inline-block text-xs font-medium text-zinc-400">Em breve</span>
++          <section className="p-5">
++            <div className="flex gap-4">
++              <span className="grid size-9 shrink-0 place-items-center rounded-lg bg-zinc-100 text-zinc-600 dark:bg-zinc-800 dark:text-zinc-300">
++                <Monitor className="size-4" />
++              </span>
++              <div className="min-w-0 flex-1">
++                <h2 className="font-medium">Aparência</h2>
++                <p className="mt-1 text-sm leading-6 text-zinc-600 dark:text-zinc-400">
++                  Escolha entre tema claro, escuro ou do sistema.
++                </p>
++                <div className="mt-4">
++                  <AppearanceForm />
++                </div>
++              </div>
+             </div>
+           </section>
+         </div>
+diff --git a/src/components/chat/chat-panel.tsx b/src/components/chat/chat-panel.tsx
+index 26573f7..b008b52 100644
+--- a/src/components/chat/chat-panel.tsx
++++ b/src/components/chat/chat-panel.tsx
+@@ -54,6 +54,16 @@ export function ChatPanel({ project, onSeek }: ChatPanelProps) {
+     listRef.current?.scrollTo({ top: listRef.current.scrollHeight, behavior: "smooth" });
+   }, [messages, isStreaming]);
+ 
++  useEffect(() => {
++    function onKeyDown(event: KeyboardEvent) {
++      if (event.key === "Escape" && abortRef.current) {
++        abortRef.current.abort();
++      }
++    }
++    window.addEventListener("keydown", onKeyDown);
++    return () => window.removeEventListener("keydown", onKeyDown);
++  }, []);
++
+   function persist(nextMessages: ChatMessage[]) {
+     const now = new Date().toISOString();
+     const firstUser = nextMessages.find((message) => message.role === "user");
+diff --git a/src/components/foundation/status-message.tsx b/src/components/foundation/status-message.tsx
+new file mode 100644
+index 0000000..e48f566
+--- /dev/null
++++ b/src/components/foundation/status-message.tsx
+@@ -0,0 +1,29 @@
++import type { ReactNode } from "react";
++
++type StatusMessageProps = {
++  tone?: "neutral" | "loading" | "error" | "success";
++  children: ReactNode;
++  className?: string;
++};
++
++const TONE_CLASS: Record<NonNullable<StatusMessageProps["tone"]>, string> = {
++  neutral: "border-zinc-200 bg-zinc-50 text-zinc-600 dark:border-zinc-800 dark:bg-zinc-950 dark:text-zinc-400",
++  loading: "border-zinc-200 bg-zinc-50 text-zinc-600 dark:border-zinc-800 dark:bg-zinc-950 dark:text-zinc-400",
++  error: "border-red-200 bg-red-50 text-red-700 dark:border-red-950 dark:bg-red-950/30 dark:text-red-300",
++  success: "border-emerald-200 bg-emerald-50 text-emerald-800 dark:border-emerald-950 dark:bg-emerald-950/30 dark:text-emerald-300",
++};
++
++/** Compact status banner for loading, error, and empty helper copy. */
++export function StatusMessage({ tone = "neutral", children, className = "" }: StatusMessageProps) {
++  const role = tone === "error" ? "alert" : tone === "loading" ? "status" : undefined;
++  const live = tone === "loading" ? "polite" : undefined;
++  return (
++    <p
++      role={role}
++      aria-live={live}
++      className={`rounded-lg border px-3 py-2 text-sm leading-6 ${TONE_CLASS[tone]} ${className}`.trim()}
++    >
++      {children}
++    </p>
++  );
++}
+diff --git a/src/components/layout/app-shell.tsx b/src/components/layout/app-shell.tsx
+index 4175398..543a4b5 100644
+--- a/src/components/layout/app-shell.tsx
++++ b/src/components/layout/app-shell.tsx
+@@ -9,8 +9,18 @@ type AppShellProps = {
+ export function AppShell({ children, compact = false }: AppShellProps) {
+   return (
+     <div className="min-h-screen bg-zinc-50 text-zinc-950 selection:bg-violet-200 selection:text-violet-950 dark:bg-zinc-950 dark:text-zinc-50">
++      <a
++        href="#conteudo-principal"
++        className="sr-only focus:not-sr-only focus:absolute focus:left-4 focus:top-4 focus:z-50 focus:rounded-lg focus:bg-violet-600 focus:px-3 focus:py-2 focus:text-sm focus:font-medium focus:text-white"
++      >
++        Ir para o conteúdo
++      </a>
+       <Navigation />
+-      <main className={compact ? "mx-auto w-full max-w-7xl px-4 py-6 sm:px-6 lg:px-8" : "mx-auto w-full max-w-6xl px-4 py-12 sm:px-6 lg:px-8"}>
++      <main
++        id="conteudo-principal"
++        tabIndex={-1}
++        className={compact ? "mx-auto w-full max-w-7xl px-4 py-6 sm:px-6 lg:px-8" : "mx-auto w-full max-w-6xl px-4 py-12 sm:px-6 lg:px-8"}
++      >
+         {children}
+       </main>
+     </div>
+diff --git a/src/components/layout/navigation.tsx b/src/components/layout/navigation.tsx
+index 6dd42f5..ed3280b 100644
+--- a/src/components/layout/navigation.tsx
++++ b/src/components/layout/navigation.tsx
+@@ -34,7 +34,7 @@ export function Navigation() {
+                 aria-current={active ? "page" : undefined}
+               >
+                 <Icon className="size-4" />
+-                <span className="hidden md:inline">{label}</span>
++                <span className="hidden sm:inline">{label}</span>
+               </Link>
+             );
+           })}
+diff --git a/src/components/library/library-page-client.tsx b/src/components/library/library-page-client.tsx
+index 3a23936..6f48590 100644
+--- a/src/components/library/library-page-client.tsx
++++ b/src/components/library/library-page-client.tsx
+@@ -140,7 +140,7 @@ export function LibraryPageClient() {
+ 
+         <div className="mt-6">
+           <PhaseNotice>
+-            A biblioteca lista, busca e exclui projetos salvos no localStorage deste navegador.
++            Biblioteca local com busca, estados vazios e exclusão — dados só neste navegador.
+           </PhaseNotice>
+         </div>
+       </div>
+diff --git a/src/components/providers/app-providers.tsx b/src/components/providers/app-providers.tsx
+index 32491b6..0909603 100644
+--- a/src/components/providers/app-providers.tsx
++++ b/src/components/providers/app-providers.tsx
+@@ -1,6 +1,7 @@
+ "use client";
+ 
+ import { useEffect, type ReactNode } from "react";
++import { ThemeSync } from "@/components/providers/theme-sync";
+ import { useProjectStore } from "@/stores/project-store";
+ import { useSettingsStore } from "@/stores/settings-store";
+ 
+@@ -14,5 +15,10 @@ export function AppProviders({ children }: { children: ReactNode }) {
+     hydrateSettings();
+   }, [hydrateProjects, hydrateSettings]);
+ 
+-  return children;
++  return (
++    <>
++      <ThemeSync />
++      {children}
++    </>
++  );
+ }
+diff --git a/src/components/providers/theme-sync.tsx b/src/components/providers/theme-sync.tsx
+new file mode 100644
+index 0000000..b774d0d
+--- /dev/null
++++ b/src/components/providers/theme-sync.tsx
+@@ -0,0 +1,26 @@
++"use client";
++
++import { useEffect } from "react";
++import { applyResolvedTheme, resolveTheme } from "@/lib/theme/resolve-theme";
++import { useSettingsStore } from "@/stores/settings-store";
++
++/** Keeps the document `dark` class aligned with the persisted theme preference. */
++export function ThemeSync() {
++  const theme = useSettingsStore((state) => state.settings.theme);
++  const hasHydrated = useSettingsStore((state) => state.hasHydrated);
++
++  useEffect(() => {
++    if (!hasHydrated) return;
++
++    const media = window.matchMedia("(prefers-color-scheme: dark)");
++    const sync = () => {
++      applyResolvedTheme(resolveTheme(theme, media.matches));
++    };
++
++    sync();
++    media.addEventListener("change", sync);
++    return () => media.removeEventListener("change", sync);
++  }, [hasHydrated, theme]);
++
++  return null;
++}
+diff --git a/src/components/settings/appearance-form.tsx b/src/components/settings/appearance-form.tsx
+new file mode 100644
+index 0000000..18971e6
+--- /dev/null
++++ b/src/components/settings/appearance-form.tsx
+@@ -0,0 +1,54 @@
++"use client";
++
++import type { ThemePreference } from "@/types";
++import { useSettingsStore } from "@/stores/settings-store";
++
++const OPTIONS: Array<{ id: ThemePreference; label: string; description: string }> = [
++  { id: "light", label: "Claro", description: "Sempre usa o tema claro." },
++  { id: "dark", label: "Escuro", description: "Sempre usa o tema escuro." },
++  { id: "system", label: "Sistema", description: "Acompanha a preferência do sistema." },
++];
++
++export function AppearanceForm() {
++  const theme = useSettingsStore((state) => state.settings.theme);
++  const updateSettings = useSettingsStore((state) => state.updateSettings);
++  const hasHydrated = useSettingsStore((state) => state.hasHydrated);
++
++  if (!hasHydrated) {
++    return <p className="text-sm text-zinc-500">Carregando preferência de tema...</p>;
++  }
++
++  return (
++    <fieldset className="space-y-3">
++      <legend className="sr-only">Tema da interface</legend>
++      <div className="grid gap-2 sm:grid-cols-3" role="radiogroup" aria-label="Tema da interface">
++        {OPTIONS.map((option) => {
++          const selected = theme === option.id;
++          return (
++            <label
++              key={option.id}
++              className={`cursor-pointer rounded-xl border px-3 py-3 transition ${
++                selected
++                  ? "border-violet-500 bg-violet-50 ring-2 ring-violet-500/20 dark:border-violet-400 dark:bg-violet-950/40"
++                  : "border-zinc-200 bg-white hover:border-zinc-300 dark:border-zinc-700 dark:bg-zinc-950 dark:hover:border-zinc-600"
++              }`}
++            >
++              <input
++                type="radio"
++                name="theme"
++                value={option.id}
++                checked={selected}
++                onChange={() => updateSettings({ theme: option.id })}
++                className="sr-only"
++              />
++              <span className="block text-sm font-medium">{option.label}</span>
++              <span className="mt-1 block text-xs leading-5 text-zinc-500 dark:text-zinc-400">
++                {option.description}
++              </span>
++            </label>
++          );
++        })}
++      </div>
++    </fieldset>
++  );
++}
+diff --git a/src/components/settings/chat-settings-form.tsx b/src/components/settings/chat-settings-form.tsx
+index b3d3d64..bb073e7 100644
+--- a/src/components/settings/chat-settings-form.tsx
++++ b/src/components/settings/chat-settings-form.tsx
+@@ -2,6 +2,7 @@
+ 
+ import { useState, type FormEvent } from "react";
+ import type { AIProviderId } from "@/types";
++import { StatusMessage } from "@/components/foundation/status-message";
+ import { Button } from "@/components/ui/button";
+ import { Input } from "@/components/ui/input";
+ import { useSettingsStore } from "@/stores/settings-store";
+@@ -29,34 +30,109 @@ export function ChatSettingsForm() {
+   const updateSettings = useSettingsStore((state) => state.updateSettings);
+   const hasHydrated = useSettingsStore((state) => state.hasHydrated);
+   const [saved, setSaved] = useState(false);
++  const [testStatus, setTestStatus] = useState<"idle" | "loading" | "success" | "error">("idle");
++  const [testMessage, setTestMessage] = useState<string | null>(null);
+   const current = settings.chatProvider;
+   const providerMeta = PROVIDERS.find((item) => item.id === current.provider) ?? PROVIDERS[0]!;
+ 
++  function readChatConfig(form: HTMLFormElement) {
++    const data = new FormData(form);
++    const provider = String(data.get("provider") ?? "openai") as AIProviderId;
++    const model = String(data.get("model") ?? "").trim();
++    const apiKey = String(data.get("apiKey") ?? "");
++    const baseUrlValue = String(data.get("baseUrl") ?? "").trim();
++    return {
++      provider,
++      model,
++      apiKey,
++      baseUrl: provider === "openai-compatible" && baseUrlValue ? baseUrlValue : undefined,
++    };
++  }
++
+   function handleSubmit(event: FormEvent<HTMLFormElement>) {
+     event.preventDefault();
+-    const form = new FormData(event.currentTarget);
+-    const provider = String(form.get("provider") ?? "openai") as AIProviderId;
+-    const model = String(form.get("model") ?? "").trim();
+-    const apiKey = String(form.get("apiKey") ?? "");
+-    const baseUrlValue = String(form.get("baseUrl") ?? "").trim();
+-    updateSettings({
+-      chatProvider: {
+-        provider,
+-        model,
+-        apiKey,
+-        baseUrl: provider === "openai-compatible" && baseUrlValue ? baseUrlValue : undefined,
+-      },
+-    });
++    updateSettings({ chatProvider: readChatConfig(event.currentTarget) });
+     setSaved(true);
+     window.setTimeout(() => setSaved(false), 2_000);
+   }
+ 
++  async function testProvider(form: HTMLFormElement) {
++    const config = readChatConfig(form);
++    if (!config.apiKey.trim()) {
++      setTestStatus("error");
++      setTestMessage("Informe a chave de API antes de testar.");
++      return;
++    }
++    if (!config.model.trim()) {
++      setTestStatus("error");
++      setTestMessage("Informe o modelo antes de testar.");
++      return;
++    }
++
++    setTestStatus("loading");
++    setTestMessage(null);
++    try {
++      const response = await fetch("/api/chat", {
++        method: "POST",
++        headers: { "Content-Type": "application/json" },
++        body: JSON.stringify({
++          ...config,
++          videoTitle: "Teste de provedor",
++          transcriptText: "Contexto curto para validar a conexão com o provedor de chat.",
++          messages: [{ role: "user", content: "Responda apenas com a palavra ok." }],
++        }),
++      });
++
++      if (!response.ok) {
++        const body = await response.json() as { message?: string };
++        throw new Error(body.message ?? "Não foi possível testar o provedor.");
++      }
++      if (!response.body) throw new Error("Resposta de teste sem corpo.");
++
++      const reader = response.body.getReader();
++      const decoder = new TextDecoder();
++      let buffer = "";
++      let received = false;
++
++      while (true) {
++        const { done, value } = await reader.read();
++        if (done) break;
++        buffer += decoder.decode(value, { stream: true });
++        const lines = buffer.split("\n");
++        buffer = lines.pop() ?? "";
++        for (const line of lines) {
++          if (!line.trim()) continue;
++          const event = JSON.parse(line) as { type: string; message?: string };
++          if (event.type === "delta") received = true;
++          if (event.type === "error") throw new Error(event.message ?? "Falha no provedor.");
++        }
++      }
++
++      if (!received) throw new Error("O provedor não retornou conteúdo.");
++      updateSettings({ chatProvider: config });
++      setTestStatus("success");
++      setTestMessage("Conexão com o provedor confirmada.");
++    } catch (error) {
++      setTestStatus("error");
++      setTestMessage(error instanceof Error ? error.message : "Não foi possível testar o provedor.");
++    }
++  }
++
+   if (!hasHydrated) {
+     return <p className="text-sm text-zinc-500">Carregando preferências locais...</p>;
+   }
+ 
+   return (
+-    <form className="space-y-4" onSubmit={handleSubmit}>
++    <form
++      className="space-y-4"
++      onSubmit={handleSubmit}
++      onKeyDown={(event) => {
++        if (event.key === "Escape") {
++          setTestStatus("idle");
++          setTestMessage(null);
++        }
++      }}
++    >
+       <div className="grid gap-4 sm:grid-cols-2">
+         <label className="grid gap-1.5 text-sm">
+           <span className="font-medium">Provedor</span>
+@@ -127,10 +203,31 @@ export function ChatSettingsForm() {
+         />
+       </label>
+ 
+-      <div className="flex items-center gap-3">
++      <div className="flex flex-wrap items-center gap-3">
+         <Button type="submit">Salvar chat</Button>
++        <Button
++          type="button"
++          variant="outline"
++          disabled={testStatus === "loading"}
++          onClick={(event) => {
++            const form = event.currentTarget.form;
++            if (form) void testProvider(form);
++          }}
++        >
++          {testStatus === "loading" ? "Testando..." : "Testar provedor"}
++        </Button>
+         {saved && <p className="text-sm text-emerald-700 dark:text-emerald-300">Preferências salvas localmente.</p>}
+       </div>
++
++      {testStatus === "loading" && (
++        <StatusMessage tone="loading">Enviando uma pergunta curta ao provedor...</StatusMessage>
++      )}
++      {testStatus === "success" && testMessage && (
++        <StatusMessage tone="success">{testMessage}</StatusMessage>
++      )}
++      {testStatus === "error" && testMessage && (
++        <StatusMessage tone="error">{testMessage}</StatusMessage>
++      )}
+     </form>
+   );
+ }
+diff --git a/src/components/transcript/transcript-segment.tsx b/src/components/transcript/transcript-segment.tsx
+index a9e73cd..b34612f 100644
+--- a/src/components/transcript/transcript-segment.tsx
++++ b/src/components/transcript/transcript-segment.tsx
+@@ -39,7 +39,9 @@ export function TranscriptSegmentRow({
+       type="button"
+       data-segment-id={segment.id}
+       onClick={() => onSeek(segment.start)}
+-      className={`grid w-full grid-cols-[4.5rem_minmax(0,1fr)] gap-3 rounded-lg px-2 py-2 text-left text-sm transition ${
++      aria-label={`Ir para ${formatTimestamp(segment.start)}`}
++      aria-current={active ? "true" : undefined}
++      className={`grid w-full grid-cols-[4.5rem_minmax(0,1fr)] gap-3 rounded-lg px-2 py-2 text-left text-sm transition focus-visible:outline-none ${
+         active
+           ? "bg-violet-100 text-violet-950 dark:bg-violet-950/50 dark:text-violet-100"
+           : "hover:bg-zinc-100 dark:hover:bg-zinc-800/80"
+diff --git a/src/components/transcription/video-workspace.tsx b/src/components/transcription/video-workspace.tsx
+index 532a17c..ed2b2b0 100644
+--- a/src/components/transcription/video-workspace.tsx
++++ b/src/components/transcription/video-workspace.tsx
+@@ -188,6 +188,22 @@ export function VideoWorkspace({ projectId }: { projectId: string }) {
+         className="mb-4 flex gap-1 rounded-xl bg-zinc-100 p-1 dark:bg-zinc-900 lg:hidden"
+         role="tablist"
+         aria-label="Seções do espaço de trabalho"
++        onKeyDown={(event) => {
++          if (event.key !== "ArrowRight" && event.key !== "ArrowLeft" && event.key !== "Home" && event.key !== "End") {
++            return;
++          }
++          event.preventDefault();
++          const currentIndex = tabs.findIndex((item) => item.id === tab);
++          let nextIndex = currentIndex;
++          if (event.key === "ArrowRight") nextIndex = (currentIndex + 1) % tabs.length;
++          if (event.key === "ArrowLeft") nextIndex = (currentIndex - 1 + tabs.length) % tabs.length;
++          if (event.key === "Home") nextIndex = 0;
++          if (event.key === "End") nextIndex = tabs.length - 1;
++          const next = tabs[nextIndex];
++          if (!next) return;
++          setTab(next.id);
++          document.getElementById(`workspace-tab-${next.id}`)?.focus();
++        }}
+       >
+         {tabs.map((item) => (
+           <button
+@@ -279,7 +295,7 @@ export function VideoWorkspace({ projectId }: { projectId: string }) {
+ 
+       <div className="mt-6">
+         <PhaseNotice>
+-          Fase 8: cookies.txt de sessão para vídeos privados/autenticados; o servidor apaga o arquivo após cada job.
++          Fase 9: tema claro/escuro, estados de carregamento/erro, navegação por teclado e teste de provedor de chat.
+         </PhaseNotice>
+       </div>
+     </AppShell>
+diff --git a/src/lib/theme/resolve-theme.test.ts b/src/lib/theme/resolve-theme.test.ts
+new file mode 100644
+index 0000000..57dd331
+--- /dev/null
++++ b/src/lib/theme/resolve-theme.test.ts
+@@ -0,0 +1,14 @@
++import { describe, expect, it } from "vitest";
++import { resolveTheme } from "./resolve-theme";
++
++describe("resolveTheme", () => {
++  it("honors explicit light and dark preferences", () => {
++    expect(resolveTheme("light", true)).toBe("light");
++    expect(resolveTheme("dark", false)).toBe("dark");
++  });
++
++  it("follows the system preference when theme is system", () => {
++    expect(resolveTheme("system", true)).toBe("dark");
++    expect(resolveTheme("system", false)).toBe("light");
++  });
++});
+diff --git a/src/lib/theme/resolve-theme.ts b/src/lib/theme/resolve-theme.ts
+new file mode 100644
+index 0000000..6b767ac
+--- /dev/null
++++ b/src/lib/theme/resolve-theme.ts
+@@ -0,0 +1,20 @@
++import type { ThemePreference } from "@/types";
++
++export type ResolvedTheme = "light" | "dark";
++
++/** Resolves a stored preference against the current system color scheme. */
++export function resolveTheme(
++  preference: ThemePreference,
++  systemPrefersDark: boolean,
++): ResolvedTheme {
++  if (preference === "light") return "light";
++  if (preference === "dark") return "dark";
++  return systemPrefersDark ? "dark" : "light";
++}
++
++/** Applies or removes the Tailwind `dark` class on the document element. */
++export function applyResolvedTheme(theme: ResolvedTheme): void {
++  if (typeof document === "undefined") return;
++  document.documentElement.classList.toggle("dark", theme === "dark");
++  document.documentElement.style.colorScheme = theme;
++}
+diff --git a/src/lib/theme/theme-bootstrap.ts b/src/lib/theme/theme-bootstrap.ts
+new file mode 100644
+index 0000000..85aaf29
+--- /dev/null
++++ b/src/lib/theme/theme-bootstrap.ts
+@@ -0,0 +1,7 @@
++import { STORAGE_KEY } from "@/lib/storage/adapter";
++
++/**
++ * Inline script source that applies the saved theme before paint to avoid FOUC.
++ * Keep this dependency-free and safe if localStorage is unavailable.
++ */
++export const THEME_BOOTSTRAP_SCRIPT = `(function(){try{var raw=localStorage.getItem(${JSON.stringify(STORAGE_KEY)});var preference="system";if(raw){var parsed=JSON.parse(raw);if(parsed&&parsed.settings&&typeof parsed.settings.theme==="string"){preference=parsed.settings.theme;}}var dark=preference==="dark"||(preference!=="light"&&window.matchMedia("(prefers-color-scheme: dark)").matches);document.documentElement.classList.toggle("dark",dark);document.documentElement.style.colorScheme=dark?"dark":"light";}catch(e){}})();`;
