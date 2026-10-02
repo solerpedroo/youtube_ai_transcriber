@@ -50,8 +50,18 @@ export async function POST(request: Request) {
     start(controller) {
       const encoder = new TextEncoder();
       const send = (event: TranscriptionProgressEvent) => {
+        if (request.signal.aborted) return;
         controller.enqueue(encoder.encode(encodeEvent(event)));
       };
+
+      const onAbort = () => {
+        try {
+          controller.close();
+        } catch {
+          // already closed
+        }
+      };
+      request.signal.addEventListener("abort", onAbort, { once: true });
 
       void (async () => {
         try {
@@ -61,11 +71,14 @@ export async function POST(request: Request) {
             apiKey: body.data.apiKey,
             model: body.data.model,
             language: body.data.language,
+            signal: request.signal,
             onProgress: (event) => send(event),
           });
+          if (request.signal.aborted) return;
           send({ type: "complete", transcript });
           controller.close();
         } catch (error) {
+          if (request.signal.aborted) return;
           if (isAppError(error)) {
             send({ type: "error", code: error.code, message: error.message });
             controller.close();
@@ -73,8 +86,13 @@ export async function POST(request: Request) {
           }
           send({ type: "error", code: "TRANSCRIPTION_FAILED", message: "Não foi possível concluir a transcrição." });
           controller.close();
+        } finally {
+          request.signal.removeEventListener("abort", onAbort);
         }
       })();
+    },
+    cancel() {
+      // Client disconnected; AbortSignal from the request is the source of truth for cancellation.
     },
   });
 
