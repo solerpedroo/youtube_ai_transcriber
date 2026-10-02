@@ -15,7 +15,9 @@ export type ApiErrorCode =
   | "TRANSCRIPTION_FAILED"
   | "PROVIDER_AUTH_FAILED"
   | "RATE_LIMITED"
-  | "INVALID_PROVIDER";
+  | "INVALID_PROVIDER"
+  | "CONTEXT_TOO_LARGE"
+  | "CHAT_FAILED";
 
 export class AppError extends Error {
   constructor(

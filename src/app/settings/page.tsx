@@ -1,3 +1,4 @@
+import { ChatSettingsForm } from "@/components/settings/chat-settings-form";
 import { TranscriptionSettingsForm } from "@/components/settings/transcription-settings-form";
 import { PhaseNotice } from "@/components/foundation/phase-notice";
 import { AppShell } from "@/components/layout/app-shell";
@@ -17,6 +18,23 @@ export default function SettingsPage() {
           <section className="border-b border-zinc-100 p-5 dark:border-zinc-800">
             <div className="flex gap-4">
               <span className="grid size-9 shrink-0 place-items-center rounded-lg bg-zinc-100 text-zinc-600 dark:bg-zinc-800 dark:text-zinc-300">
+                <Bot className="size-4" />
+              </span>
+              <div className="min-w-0 flex-1">
+                <h2 className="font-medium">Provedor de IA</h2>
+                <p className="mt-1 text-sm leading-6 text-zinc-600 dark:text-zinc-400">
+                  Configure o provedor e modelo para o chat. A chave fica apenas neste navegador.
+                </p>
+                <div className="mt-4">
+                  <ChatSettingsForm />
+                </div>
+              </div>
+            </div>
+          </section>
+
+          <section className="border-b border-zinc-100 p-5 dark:border-zinc-800">
+            <div className="flex gap-4">
+              <span className="grid size-9 shrink-0 place-items-center rounded-lg bg-zinc-100 text-zinc-600 dark:bg-zinc-800 dark:text-zinc-300">
                 <KeyRound className="size-4" />
               </span>
               <div className="min-w-0 flex-1">
@@ -28,19 +46,6 @@ export default function SettingsPage() {
                   <TranscriptionSettingsForm />
                 </div>
               </div>
-            </div>
-          </section>
-
-          <section className="flex gap-4 border-b border-zinc-100 p-5 dark:border-zinc-800">
-            <span className="grid size-9 shrink-0 place-items-center rounded-lg bg-zinc-100 text-zinc-600 dark:bg-zinc-800 dark:text-zinc-300">
-              <Bot className="size-4" />
-            </span>
-            <div>
-              <h2 className="font-medium">Provedor de IA</h2>
-              <p className="mt-1 text-sm leading-6 text-zinc-600 dark:text-zinc-400">
-                Configure o provedor e modelo para o chat.
-              </p>
-              <span className="mt-2 inline-block text-xs font-medium text-zinc-400">Em breve</span>
             </div>
           </section>
 
@@ -75,7 +80,7 @@ export default function SettingsPage() {
           <PhaseNotice>
             <span className="inline-flex items-center gap-2">
               <ShieldCheck className="size-4" />
-              As chaves de transcrição ficam apenas neste navegador e não devem ser registradas em logs do servidor.
+              As chaves de chat e transcrição ficam apenas neste navegador e não devem ser registradas em logs do servidor.
             </span>
           </PhaseNotice>
         </div>
