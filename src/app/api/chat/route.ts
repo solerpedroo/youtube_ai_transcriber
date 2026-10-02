@@ -75,6 +75,12 @@ export async function POST(request: Request) {
     if (path === "provider" || path === "model" || path === "apiKey") {
       return Response.json({ code: "INVALID_PROVIDER", message: "Informe provedor, modelo e chave de API válidos." }, { status: 400 });
     }
+    if (path === "transcriptSegments") {
+      return Response.json({
+        code: "CHAT_FAILED",
+        message: issue?.message ?? "Segmentos de transcrição inválidos para o chat.",
+      }, { status: 400 });
+    }
     return Response.json({ code: "CHAT_FAILED", message: "Mensagens de chat inválidas." }, { status: 400 });
   }
 
