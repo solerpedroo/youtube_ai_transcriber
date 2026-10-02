@@ -1,0 +1,216 @@
+diff --git a/src/components/transcript/transcript-actions.tsx b/src/components/transcript/transcript-actions.tsx
+index 631870c..a37a845 100644
+--- a/src/components/transcript/transcript-actions.tsx
++++ b/src/components/transcript/transcript-actions.tsx
+@@ -29,13 +29,23 @@ const EXPORTS = [
+ 
+ export function TranscriptActions({ metadata, transcript }: TranscriptActionsProps) {
+   const [copied, setCopied] = useState(false);
++  const [copyError, setCopyError] = useState<string | null>(null);
+   const baseName = slugifyFilename(metadata.title);
+ 
+   async function copyTranscript() {
++    setCopyError(null);
+     const text = exportTranscriptTxt({ metadata, transcript });
+-    await navigator.clipboard.writeText(text);
+-    setCopied(true);
+-    window.setTimeout(() => setCopied(false), 1_500);
++    try {
++      if (!navigator.clipboard?.writeText) {
++        throw new Error("A área de transferência não está disponível neste navegador.");
++      }
++      await navigator.clipboard.writeText(text);
++      setCopied(true);
++      window.setTimeout(() => setCopied(false), 1_500);
++    } catch (error) {
++      setCopied(false);
++      setCopyError(error instanceof Error ? error.message : "Não foi possível copiar a transcrição.");
++    }
+   }
+ 
+   function exportAs(kind: (typeof EXPORTS)[number]["id"]) {
+@@ -54,25 +64,30 @@ export function TranscriptActions({ metadata, transcript }: TranscriptActionsPro
+   }
+ 
+   return (
+-    <div className="flex flex-wrap items-center gap-2">
+-      <Button type="button" size="sm" variant="outline" onClick={() => void copyTranscript()}>
+-        {copied ? <Check className="size-4" /> : <Copy className="size-4" />}
+-        {copied ? "Copiado" : "Copiar"}
+-      </Button>
+-      <div className="flex flex-wrap gap-1">
+-        {EXPORTS.map((item) => (
+-          <Button
+-            key={item.id}
+-            type="button"
+-            size="sm"
+-            variant="ghost"
+-            onClick={() => exportAs(item.id)}
+-          >
+-            <Download className="size-3.5" />
+-            {item.label}
+-          </Button>
+-        ))}
++    <div className="flex flex-col items-start gap-2">
++      <div className="flex flex-wrap items-center gap-2">
++        <Button type="button" size="sm" variant="outline" onClick={() => void copyTranscript()}>
++          {copied ? <Check className="size-4" /> : <Copy className="size-4" />}
++          {copied ? "Copiado" : "Copiar"}
++        </Button>
++        <div className="flex flex-wrap gap-1">
++          {EXPORTS.map((item) => (
++            <Button
++              key={item.id}
++              type="button"
++              size="sm"
++              variant="ghost"
++              onClick={() => exportAs(item.id)}
++            >
++              <Download className="size-3.5" />
++              {item.label}
++            </Button>
++          ))}
++        </div>
+       </div>
++      {copyError && (
++        <p className="text-xs text-red-600 dark:text-red-300" role="alert">{copyError}</p>
++      )}
+     </div>
+   );
+ }
+diff --git a/src/components/transcription/video-workspace.tsx b/src/components/transcription/video-workspace.tsx
+index b6ce893..feafa7d 100644
+--- a/src/components/transcription/video-workspace.tsx
++++ b/src/components/transcription/video-workspace.tsx
+@@ -84,8 +84,8 @@ export function VideoWorkspace({ projectId }: { projectId: string }) {
+   );
+ 
+   function seekTo(seconds: number) {
+-    playerRef.current?.seekTo(seconds);
+-    setCurrentTime(seconds);
++    const seeked = playerRef.current?.seekTo(seconds) ?? false;
++    if (seeked) setCurrentTime(seconds);
+     setTab("video");
+   }
+ 
+@@ -185,11 +185,20 @@ export function VideoWorkspace({ projectId }: { projectId: string }) {
+         statusLabel={project.transcript ? "Transcrição disponível" : "Sem transcrição"}
+       />
+ 
+-      <div className="mb-4 flex gap-1 rounded-xl bg-zinc-100 p-1 dark:bg-zinc-900 lg:hidden">
++      <div
++        className="mb-4 flex gap-1 rounded-xl bg-zinc-100 p-1 dark:bg-zinc-900 lg:hidden"
++        role="tablist"
++        aria-label="Seções do espaço de trabalho"
++      >
+         {tabs.map((item) => (
+           <button
+             key={item.id}
+             type="button"
++            role="tab"
++            id={`workspace-tab-${item.id}`}
++            aria-selected={tab === item.id}
++            aria-controls={`workspace-panel-${item.id}`}
++            tabIndex={tab === item.id ? 0 : -1}
+             onClick={() => setTab(item.id)}
+             className={`flex-1 rounded-lg px-3 py-2 text-sm font-medium transition ${
+               tab === item.id
+@@ -204,7 +213,12 @@ export function VideoWorkspace({ projectId }: { projectId: string }) {
+ 
+       <div className="grid gap-6 lg:grid-cols-[minmax(0,1.85fr)_minmax(20rem,1fr)]">
+         <section className={`overflow-hidden rounded-2xl border border-zinc-200 bg-white shadow-sm dark:border-zinc-800 dark:bg-zinc-900 ${tab === "chat" ? "hidden lg:block" : ""}`}>
+-          <div className={tab === "transcript" ? "hidden lg:block" : ""}>
++          <div
++            id="workspace-panel-video"
++            role="tabpanel"
++            aria-labelledby="workspace-tab-video"
++            className={tab === "transcript" ? "hidden lg:block" : ""}
++          >
+             <YoutubePlayer
+               ref={playerRef}
+               videoId={project.metadata.videoId}
+@@ -213,7 +227,12 @@ export function VideoWorkspace({ projectId }: { projectId: string }) {
+             />
+           </div>
+ 
+-          <div className={`p-5 ${tab === "video" ? "hidden lg:block" : ""}`}>
++          <div
++            id="workspace-panel-transcript"
++            role="tabpanel"
++            aria-labelledby="workspace-tab-transcript"
++            className={`p-5 ${tab === "video" ? "hidden lg:block" : ""}`}
++          >
+             <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
+               <h2 className="font-semibold">Transcrição</h2>
+               <Button type="button" size="sm" disabled={isTranscribing} onClick={() => void startTranscription()}>
+diff --git a/src/components/video/youtube-player.tsx b/src/components/video/youtube-player.tsx
+index 6266f12..5eb2a07 100644
+--- a/src/components/video/youtube-player.tsx
++++ b/src/components/video/youtube-player.tsx
+@@ -10,7 +10,7 @@ import {
+ import { loadYoutubeIframeApi, type YoutubePlayerBridge } from "@/lib/youtube/iframe-api";
+ 
+ export type YoutubePlayerHandle = {
+-  seekTo: (seconds: number) => void;
++  seekTo: (seconds: number) => boolean;
+ };
+ 
+ type YoutubePlayerProps = {
+@@ -24,6 +24,7 @@ export const YoutubePlayer = forwardRef<YoutubePlayerHandle, YoutubePlayerProps>
+     const hostRef = useRef<HTMLDivElement | null>(null);
+     const playerRef = useRef<YoutubePlayerBridge | null>(null);
+     const onTimeUpdateRef = useRef(onTimeUpdate);
++    const pollTimerRef = useRef<number | undefined>(undefined);
+     const [error, setError] = useState<string | null>(null);
+ 
+     useEffect(() => {
+@@ -33,15 +34,19 @@ export const YoutubePlayer = forwardRef<YoutubePlayerHandle, YoutubePlayerProps>
+     useImperativeHandle(ref, () => ({
+       seekTo(seconds: number) {
+         const player = playerRef.current;
+-        if (!player) return;
+-        player.seekTo(Math.max(0, seconds), true);
+-        player.playVideo();
++        if (!player) return false;
++        try {
++          player.seekTo(Math.max(0, seconds), true);
++          player.playVideo();
++          return true;
++        } catch {
++          return false;
++        }
+       },
+     }), []);
+ 
+     useEffect(() => {
+       let cancelled = false;
+-      let pollTimer: number | undefined;
+       const host = hostRef.current;
+       if (!host || !videoId) return;
+       if (!/^[A-Za-z0-9_-]{6,}$/.test(videoId)) {
+@@ -70,7 +75,12 @@ export const YoutubePlayer = forwardRef<YoutubePlayerHandle, YoutubePlayerProps>
+             },
+             events: {
+               onReady: () => {
+-                pollTimer = window.setInterval(() => {
++                if (cancelled) return;
++                if (pollTimerRef.current !== undefined) {
++                  window.clearInterval(pollTimerRef.current);
++                }
++                pollTimerRef.current = window.setInterval(() => {
++                  if (cancelled) return;
+                   const player = playerRef.current;
+                   if (!player) return;
+                   try {
+@@ -91,7 +101,10 @@ export const YoutubePlayer = forwardRef<YoutubePlayerHandle, YoutubePlayerProps>
+ 
+       return () => {
+         cancelled = true;
+-        if (pollTimer !== undefined) window.clearInterval(pollTimer);
++        if (pollTimerRef.current !== undefined) {
++          window.clearInterval(pollTimerRef.current);
++          pollTimerRef.current = undefined;
++        }
+         try {
+           playerRef.current?.destroy();
+         } catch {
