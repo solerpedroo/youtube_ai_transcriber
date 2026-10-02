@@ -63,3 +63,11 @@ describe("segmentsToTranscriptPayload", () => {
     });
   });
 });
+
+describe("listSubtitleTracks validation", () => {
+  it("rejects catalogs without a video id", () => {
+    expect(() => listSubtitleTracks({ subtitles: { en: [{ ext: "vtt" }] } })).toThrowError(
+      expect.objectContaining({ code: "SUBTITLE_EXTRACTION_FAILED" }),
+    );
+  });
+});
