@@ -1,0 +1,281 @@
+diff --git a/src/app/api/transcription/start/route.ts b/src/app/api/transcription/start/route.ts
+index 3c9b237..002b763 100644
+--- a/src/app/api/transcription/start/route.ts
++++ b/src/app/api/transcription/start/route.ts
+@@ -50,9 +50,19 @@ export async function POST(request: Request) {
+     start(controller) {
+       const encoder = new TextEncoder();
+       const send = (event: TranscriptionProgressEvent) => {
++        if (request.signal.aborted) return;
+         controller.enqueue(encoder.encode(encodeEvent(event)));
+       };
+ 
++      const onAbort = () => {
++        try {
++          controller.close();
++        } catch {
++          // already closed
++        }
++      };
++      request.signal.addEventListener("abort", onAbort, { once: true });
++
+       void (async () => {
+         try {
+           const transcript = await runTranscriptionPipeline({
+@@ -61,11 +71,14 @@ export async function POST(request: Request) {
+             apiKey: body.data.apiKey,
+             model: body.data.model,
+             language: body.data.language,
++            signal: request.signal,
+             onProgress: (event) => send(event),
+           });
++          if (request.signal.aborted) return;
+           send({ type: "complete", transcript });
+           controller.close();
+         } catch (error) {
++          if (request.signal.aborted) return;
+           if (isAppError(error)) {
+             send({ type: "error", code: error.code, message: error.message });
+             controller.close();
+@@ -73,9 +86,14 @@ export async function POST(request: Request) {
+           }
+           send({ type: "error", code: "TRANSCRIPTION_FAILED", message: "Não foi possível concluir a transcrição." });
+           controller.close();
++        } finally {
++          request.signal.removeEventListener("abort", onAbort);
+         }
+       })();
+     },
++    cancel() {
++      // Client disconnected; AbortSignal from the request is the source of truth for cancellation.
++    },
+   });
+ 
+   return new Response(stream, {
+diff --git a/src/components/settings/transcription-settings-form.tsx b/src/components/settings/transcription-settings-form.tsx
+index 93cdc5f..b6a821d 100644
+--- a/src/components/settings/transcription-settings-form.tsx
++++ b/src/components/settings/transcription-settings-form.tsx
+@@ -8,9 +8,9 @@ import { useSettingsStore } from "@/stores/settings-store";
+ 
+ const PROVIDERS: Array<{ id: TranscriptionProviderId; label: string; models: string[] }> = [
+   { id: "groq", label: "Groq", models: ["whisper-large-v3-turbo", "whisper-large-v3"] },
+-  { id: "openai", label: "OpenAI", models: ["whisper-1", "gpt-4o-mini-transcribe", "gpt-4o-transcribe"] },
++  // Only models that support verbose_json + segment timestamps in the current adapter.
++  { id: "openai", label: "OpenAI", models: ["whisper-1"] },
+ ];
+-
+ export function TranscriptionSettingsForm() {
+   const settings = useSettingsStore((state) => state.settings);
+   const updateSettings = useSettingsStore((state) => state.updateSettings);
+diff --git a/src/components/transcription/video-workspace.tsx b/src/components/transcription/video-workspace.tsx
+index d9b121a..06c1cdf 100644
+--- a/src/components/transcription/video-workspace.tsx
++++ b/src/components/transcription/video-workspace.tsx
+@@ -1,7 +1,7 @@
+ "use client";
+ 
+ import Link from "next/link";
+-import { useEffect, useMemo, useState } from "react";
++import { useEffect, useMemo, useRef, useState } from "react";
+ import { useRouter } from "next/navigation";
+ import {
+   ArrowLeft,
+@@ -74,12 +74,17 @@ export function VideoWorkspace({ projectId }: { projectId: string }) {
+   const [progress, setProgress] = useState<string | null>(null);
+   const [error, setError] = useState<string | null>(null);
+   const [isTranscribing, setIsTranscribing] = useState(false);
++  const abortRef = useRef<AbortController | null>(null);
+ 
+   useEffect(() => {
+     if (!hasHydratedProjects) hydrateProjects();
+     if (!hasHydratedSettings) hydrateSettings();
+   }, [hasHydratedProjects, hasHydratedSettings, hydrateProjects, hydrateSettings]);
+ 
++  useEffect(() => () => {
++    abortRef.current?.abort();
++  }, []);
++
+   const project = useMemo(
+     () => projects.find((item) => item.id === projectId) as VideoProject | undefined,
+     [projectId, projects],
+@@ -92,6 +97,10 @@ export function VideoWorkspace({ projectId }: { projectId: string }) {
+       return;
+     }
+ 
++    abortRef.current?.abort();
++    const abortController = new AbortController();
++    abortRef.current = abortController;
++
+     setIsTranscribing(true);
+     setError(null);
+     setProgress("Preparando transcrição...");
+@@ -100,6 +109,7 @@ export function VideoWorkspace({ projectId }: { projectId: string }) {
+       const response = await fetch("/api/transcription/start", {
+         method: "POST",
+         headers: { "Content-Type": "application/json" },
++        signal: abortController.signal,
+         body: JSON.stringify({
+           url: project.metadata.url,
+           provider: transcriptionProvider.provider,
+@@ -128,9 +138,14 @@ export function VideoWorkspace({ projectId }: { projectId: string }) {
+       setTranscript(project.id, transcript);
+       setProgress("Transcrição concluída.");
+     } catch (requestError) {
++      if (abortController.signal.aborted) {
++        setProgress(null);
++        return;
++      }
+       setError(requestError instanceof Error ? requestError.message : "Não foi possível transcrever o vídeo.");
+       setProgress(null);
+     } finally {
++      if (abortRef.current === abortController) abortRef.current = null;
+       setIsTranscribing(false);
+     }
+   }
+diff --git a/src/lib/transcription/pipeline.ts b/src/lib/transcription/pipeline.ts
+index 18b8f73..baf2bb0 100644
+--- a/src/lib/transcription/pipeline.ts
++++ b/src/lib/transcription/pipeline.ts
+@@ -23,9 +23,16 @@ export type RunTranscriptionInput = {
+   model: string;
+   language?: string;
+   concurrency?: number;
++  signal?: AbortSignal;
+   onProgress?: (event: Extract<TranscriptionProgressEvent, { type: "status" }>) => void;
+ };
+ 
++function assertNotAborted(signal?: AbortSignal): void {
++  if (signal?.aborted) {
++    throw new AppError("TRANSCRIPTION_FAILED", "A transcrição foi cancelada.");
++  }
++}
++
+ async function mapPool<T, R>(
+   items: readonly T[],
+   concurrency: number,
+@@ -62,21 +69,26 @@ export async function runTranscriptionPipeline(input: RunTranscriptionInput): Pr
+     language: input.language,
+   };
+   const emit = input.onProgress;
++  const signal = input.signal;
++  assertNotAborted(signal);
+   const jobDirectory = await createJobDirectory();
+ 
+   try {
+     emit?.({ type: "status", status: "downloading_audio", message: "Baixando áudio do YouTube..." });
+     const sourcePath = await extractAudio(input.url, jobDirectory);
++    assertNotAborted(signal);
+ 
+     emit?.({ type: "status", status: "processing_audio", message: "Normalizando áudio..." });
+     const normalizedPath = join(jobDirectory, "audio.mp3");
+     await normalizeAudio(sourcePath, normalizedPath);
++    assertNotAborted(signal);
+     const durationSeconds = await probeAudioDurationSeconds(normalizedPath);
+ 
+     emit?.({ type: "status", status: "chunking_audio", message: "Dividindo áudio em partes..." });
+     const chunksDirectory = join(jobDirectory, "chunks");
+     await mkdir(chunksDirectory, { recursive: true });
+     const chunks = await chunkAudio(normalizedPath, chunksDirectory, durationSeconds);
++    assertNotAborted(signal);
+ 
+     emit?.({
+       type: "status",
+@@ -91,7 +103,8 @@ export async function runTranscriptionPipeline(input: RunTranscriptionInput): Pr
+       chunks,
+       input.concurrency ?? DEFAULT_TRANSCRIPTION_CONCURRENCY,
+       async (chunk) => {
+-        const result = await provider.transcribe(chunk.path, options);
++        assertNotAborted(signal);
++        const result = await provider.transcribe(chunk.path, options, signal);
+         completed += 1;
+         emit?.({
+           type: "status",
+@@ -104,6 +117,7 @@ export async function runTranscriptionPipeline(input: RunTranscriptionInput): Pr
+       },
+     );
+ 
++    assertNotAborted(signal);
+     emit?.({ type: "status", status: "merging", message: "Unificando segmentos..." });
+     const merged = mergeTranscriptChunks(chunkResults);
+     if (merged.segments.length === 0) {
+diff --git a/src/lib/transcription/providers/groq.ts b/src/lib/transcription/providers/groq.ts
+index f5cd511..aa02056 100644
+--- a/src/lib/transcription/providers/groq.ts
++++ b/src/lib/transcription/providers/groq.ts
+@@ -5,7 +5,7 @@ const GROQ_TRANSCRIPTIONS_URL = "https://api.groq.com/openai/v1/audio/transcript
+ 
+ export const groqTranscriptionProvider: TranscriptionProvider = {
+   id: "groq",
+-  transcribe(filePath, options) {
+-    return transcribeWithOpenAiCompatibleApi(GROQ_TRANSCRIPTIONS_URL, filePath, options);
++  transcribe(filePath, options, signal) {
++    return transcribeWithOpenAiCompatibleApi(GROQ_TRANSCRIPTIONS_URL, filePath, options, signal);
+   },
+-};
++};
+\ No newline at end of file
+diff --git a/src/lib/transcription/providers/http.ts b/src/lib/transcription/providers/http.ts
+index 61d3eb6..2a820da 100644
+--- a/src/lib/transcription/providers/http.ts
++++ b/src/lib/transcription/providers/http.ts
+@@ -37,7 +37,12 @@ export async function transcribeWithOpenAiCompatibleApi(
+   endpoint: string,
+   filePath: string,
+   options: TranscriptionOptions,
++  signal?: AbortSignal,
+ ): Promise<TranscriptionResult> {
++  if (signal?.aborted) {
++    throw new AppError("TRANSCRIPTION_FAILED", "A transcrição foi cancelada.");
++  }
++
+   const bytes = await readFile(filePath);
+   const form = new FormData();
+   form.append(
+@@ -58,8 +63,12 @@ export async function transcribeWithOpenAiCompatibleApi(
+         Authorization: `Bearer ${options.apiKey}`,
+       },
+       body: form,
++      signal,
+     });
+-  } catch {
++  } catch (error) {
++    if (signal?.aborted || (error instanceof Error && error.name === "AbortError")) {
++      throw new AppError("TRANSCRIPTION_FAILED", "A transcrição foi cancelada.");
++    }
+     throw new AppError("TRANSCRIPTION_FAILED", "Não foi possível contatar o provedor de transcrição.");
+   }
+ 
+diff --git a/src/lib/transcription/providers/openai.ts b/src/lib/transcription/providers/openai.ts
+index 377f978..1827a7a 100644
+--- a/src/lib/transcription/providers/openai.ts
++++ b/src/lib/transcription/providers/openai.ts
+@@ -5,7 +5,7 @@ const OPENAI_TRANSCRIPTIONS_URL = "https://api.openai.com/v1/audio/transcription
+ 
+ export const openAiTranscriptionProvider: TranscriptionProvider = {
+   id: "openai",
+-  transcribe(filePath, options) {
+-    return transcribeWithOpenAiCompatibleApi(OPENAI_TRANSCRIPTIONS_URL, filePath, options);
++  transcribe(filePath, options, signal) {
++    return transcribeWithOpenAiCompatibleApi(OPENAI_TRANSCRIPTIONS_URL, filePath, options, signal);
+   },
+-};
++};
+\ No newline at end of file
+diff --git a/src/lib/transcription/types.ts b/src/lib/transcription/types.ts
+index 9437c62..ee42bba 100644
+--- a/src/lib/transcription/types.ts
++++ b/src/lib/transcription/types.ts
+@@ -32,7 +32,11 @@ export type TranscriptionResult = {
+ 
+ export type TranscriptionProvider = {
+   id: TranscriptionProviderId;
+-  transcribe(filePath: string, options: TranscriptionOptions): Promise<TranscriptionResult>;
++  transcribe(
++    filePath: string,
++    options: TranscriptionOptions,
++    signal?: AbortSignal,
++  ): Promise<TranscriptionResult>;
+ };
+ 
+ export type TranscriptionProgressEvent =
