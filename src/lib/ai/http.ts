@@ -32,7 +32,10 @@ export async function* iterateSseDataLines(
         throw new AppError("CHAT_FAILED", "O chat foi cancelado.");
       }
       const { done, value } = await reader.read();
-      if (done) break;
+      if (done) {
+        buffer += decoder.decode();
+        break;
+      }
       buffer += decoder.decode(value, { stream: true });
       const chunks = buffer.split("\n");
       buffer = chunks.pop() ?? "";
@@ -46,6 +49,12 @@ export async function* iterateSseDataLines(
         }
         yield data;
       }
+    }
+
+    const trailing = buffer.trimEnd();
+    if (trailing.startsWith("data:")) {
+      const data = trailing.slice(5).trimStart();
+      if (data && data !== "[DONE]") yield data;
     }
   } finally {
     reader.releaseLock();
