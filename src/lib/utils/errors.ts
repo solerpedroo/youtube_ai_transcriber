@@ -8,7 +8,8 @@ export type ApiErrorCode =
   | "METADATA_EXTRACTION_FAILED"
   | "PROCESS_TIMEOUT"
   | "SUBTITLES_NOT_FOUND"
-  | "SUBTITLE_EXTRACTION_FAILED";
+  | "SUBTITLE_EXTRACTION_FAILED"
+  | "INVALID_LANGUAGE";
 
 export class AppError extends Error {
   constructor(

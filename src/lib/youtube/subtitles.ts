@@ -44,7 +44,11 @@ function mapSubtitleFailure(error: AppError): AppError {
   if (details.includes("sign in") || details.includes("authentication")) {
     return new AppError("AUTH_REQUIRED", "O YouTube exige autenticação para acessar este vídeo.");
   }
-  if (details.includes("video unavailable") || details.includes("not available")) {
+  if (
+    details.includes("video unavailable")
+    || details.includes("video not available")
+    || details.includes("incomplete youtube id")
+  ) {
     return new AppError("VIDEO_NOT_FOUND", "O vídeo não está disponível.");
   }
   return new AppError("SUBTITLE_EXTRACTION_FAILED", "Não foi possível extrair as legendas do vídeo.", error.details);
@@ -133,6 +137,9 @@ async function downloadSubtitleFile(
   selected: SelectedSubtitle,
   jobDirectory: string,
 ): Promise<string> {
+  if (!/^[A-Za-z0-9._-]+$/.test(selected.language)) {
+    throw new AppError("SUBTITLE_EXTRACTION_FAILED", "O idioma de legenda retornado é inválido.");
+  }
   const writeFlag = selected.kind === "manual" ? "--write-subs" : "--write-auto-subs";
   try {
     await runProcess(
