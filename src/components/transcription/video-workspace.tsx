@@ -270,13 +270,13 @@ export function VideoWorkspace({ projectId }: { projectId: string }) {
           aria-labelledby="workspace-tab-chat"
           className={`rounded-2xl border border-zinc-200 bg-white p-5 shadow-sm dark:border-zinc-800 dark:bg-zinc-900 ${tab === "chat" ? "block" : "hidden lg:block"}`}
         >
-          <ChatPanel key={project.id} project={project} />
+          <ChatPanel key={project.id} project={project} onSeek={seekTo} />
         </aside>
       </div>
 
       <div className="mt-6">
         <PhaseNotice>
-          Fase 6: chat com streaming via provedores de IA. A recuperação avançada por trechos chega na Fase 7.
+          Fase 7: chat grounded na transcrição com retrieval por trechos e citações clicáveis [m:ss].
         </PhaseNotice>
       </div>
     </AppShell>
