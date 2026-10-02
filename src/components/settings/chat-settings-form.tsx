@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, type FormEvent } from "react";
+import { useEffect, useRef, useState, type FormEvent } from "react";
 import type { AIProviderId } from "@/types";
 import { StatusMessage } from "@/components/foundation/status-message";
 import { Button } from "@/components/ui/button";
@@ -32,8 +32,13 @@ export function ChatSettingsForm() {
   const [saved, setSaved] = useState(false);
   const [testStatus, setTestStatus] = useState<"idle" | "loading" | "success" | "error">("idle");
   const [testMessage, setTestMessage] = useState<string | null>(null);
+  const testAbortRef = useRef<AbortController | null>(null);
   const current = settings.chatProvider;
   const providerMeta = PROVIDERS.find((item) => item.id === current.provider) ?? PROVIDERS[0]!;
+
+  useEffect(() => () => {
+    testAbortRef.current?.abort();
+  }, []);
 
   function readChatConfig(form: HTMLFormElement) {
     const data = new FormData(form);
@@ -47,6 +52,13 @@ export function ChatSettingsForm() {
       apiKey,
       baseUrl: provider === "openai-compatible" && baseUrlValue ? baseUrlValue : undefined,
     };
+  }
+
+  function cancelProviderTest() {
+    testAbortRef.current?.abort();
+    testAbortRef.current = null;
+    setTestStatus("idle");
+    setTestMessage(null);
   }
 
   function handleSubmit(event: FormEvent<HTMLFormElement>) {
@@ -69,12 +81,17 @@ export function ChatSettingsForm() {
       return;
     }
 
+    testAbortRef.current?.abort();
+    const abortController = new AbortController();
+    testAbortRef.current = abortController;
+
     setTestStatus("loading");
     setTestMessage(null);
     try {
       const response = await fetch("/api/chat", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
+        signal: abortController.signal,
         body: JSON.stringify({
           ...config,
           videoTitle: "Teste de provedor",
@@ -108,13 +125,17 @@ export function ChatSettingsForm() {
         }
       }
 
+      if (abortController.signal.aborted) return;
       if (!received) throw new Error("O provedor não retornou conteúdo.");
       updateSettings({ chatProvider: config });
       setTestStatus("success");
       setTestMessage("Conexão com o provedor confirmada.");
     } catch (error) {
+      if (abortController.signal.aborted) return;
       setTestStatus("error");
       setTestMessage(error instanceof Error ? error.message : "Não foi possível testar o provedor.");
+    } finally {
+      if (testAbortRef.current === abortController) testAbortRef.current = null;
     }
   }
 
@@ -127,10 +148,7 @@ export function ChatSettingsForm() {
       className="space-y-4"
       onSubmit={handleSubmit}
       onKeyDown={(event) => {
-        if (event.key === "Escape") {
-          setTestStatus("idle");
-          setTestMessage(null);
-        }
+        if (event.key === "Escape") cancelProviderTest();
       }}
     >
       <div className="grid gap-4 sm:grid-cols-2">
