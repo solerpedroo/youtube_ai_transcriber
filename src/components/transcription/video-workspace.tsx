@@ -14,6 +14,7 @@ import { VideoHeader } from "@/components/video/video-header";
 import { YoutubePlayer, type YoutubePlayerHandle } from "@/components/video/youtube-player";
 import { useProjectStore } from "@/stores/project-store";
 import { useSettingsStore } from "@/stores/settings-store";
+import { useYoutubeCookiesStore } from "@/stores/youtube-cookies-store";
 
 type WorkspaceTab = "video" | "transcript" | "chat";
 
@@ -57,6 +58,7 @@ export function VideoWorkspace({ projectId }: { projectId: string }) {
   const hasHydratedSettings = useSettingsStore((state) => state.hasHydrated);
   const hydrateSettings = useSettingsStore((state) => state.hydrate);
   const transcriptionProvider = useSettingsStore((state) => state.settings.transcriptionProvider);
+  const cookiesText = useYoutubeCookiesStore((state) => state.cookiesText);
 
   const [progress, setProgress] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -110,6 +112,7 @@ export function VideoWorkspace({ projectId }: { projectId: string }) {
           provider: transcriptionProvider.provider,
           apiKey: transcriptionProvider.apiKey,
           model: transcriptionProvider.model,
+          ...(cookiesText ? { cookies: cookiesText } : {}),
         }),
       });
 
@@ -276,7 +279,7 @@ export function VideoWorkspace({ projectId }: { projectId: string }) {
 
       <div className="mt-6">
         <PhaseNotice>
-          Fase 7: chat grounded na transcrição com retrieval por trechos e citações clicáveis [m:ss].
+          Fase 8: cookies.txt de sessão para vídeos privados/autenticados; o servidor apaga o arquivo após cada job.
         </PhaseNotice>
       </div>
     </AppShell>
