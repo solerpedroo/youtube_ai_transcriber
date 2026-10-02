@@ -22,6 +22,8 @@ export type RunTranscriptionInput = {
   apiKey: string;
   model: string;
   language?: string;
+  /** Netscape cookies.txt contents; never persisted — written only into the job temp dir. */
+  cookies?: string;
   concurrency?: number;
   signal?: AbortSignal;
   onProgress?: (event: Extract<TranscriptionProgressEvent, { type: "status" }>) => void;
@@ -75,7 +77,7 @@ export async function runTranscriptionPipeline(input: RunTranscriptionInput): Pr
 
   try {
     emit?.({ type: "status", status: "downloading_audio", message: "Baixando áudio do YouTube..." });
-    const sourcePath = await extractAudio(input.url, jobDirectory);
+    const sourcePath = await extractAudio(input.url, jobDirectory, input.cookies);
     assertNotAborted(signal);
 
     emit?.({ type: "status", status: "processing_audio", message: "Normalizando áudio..." });
