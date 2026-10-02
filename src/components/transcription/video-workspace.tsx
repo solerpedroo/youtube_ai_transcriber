@@ -188,6 +188,22 @@ export function VideoWorkspace({ projectId }: { projectId: string }) {
         className="mb-4 flex gap-1 rounded-xl bg-zinc-100 p-1 dark:bg-zinc-900 lg:hidden"
         role="tablist"
         aria-label="Seções do espaço de trabalho"
+        onKeyDown={(event) => {
+          if (event.key !== "ArrowRight" && event.key !== "ArrowLeft" && event.key !== "Home" && event.key !== "End") {
+            return;
+          }
+          event.preventDefault();
+          const currentIndex = tabs.findIndex((item) => item.id === tab);
+          let nextIndex = currentIndex;
+          if (event.key === "ArrowRight") nextIndex = (currentIndex + 1) % tabs.length;
+          if (event.key === "ArrowLeft") nextIndex = (currentIndex - 1 + tabs.length) % tabs.length;
+          if (event.key === "Home") nextIndex = 0;
+          if (event.key === "End") nextIndex = tabs.length - 1;
+          const next = tabs[nextIndex];
+          if (!next) return;
+          setTab(next.id);
+          document.getElementById(`workspace-tab-${next.id}`)?.focus();
+        }}
       >
         {tabs.map((item) => (
           <button
@@ -279,7 +295,7 @@ export function VideoWorkspace({ projectId }: { projectId: string }) {
 
       <div className="mt-6">
         <PhaseNotice>
-          Fase 8: cookies.txt de sessão para vídeos privados/autenticados; o servidor apaga o arquivo após cada job.
+          Fase 9: tema claro/escuro, estados de carregamento/erro, navegação por teclado e teste de provedor de chat.
         </PhaseNotice>
       </div>
     </AppShell>
