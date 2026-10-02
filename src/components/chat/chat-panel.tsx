@@ -34,7 +34,7 @@ export function ChatPanel({ project }: ChatPanelProps) {
   const hasHydratedSettings = useSettingsStore((state) => state.hasHydrated);
 
   const existing = project.conversations[0];
-  const [conversationId, setConversationId] = useState(() => existing?.id ?? crypto.randomUUID());
+  const [conversationId] = useState(() => existing?.id ?? crypto.randomUUID());
   const [messages, setMessages] = useState<ChatMessage[]>(() => existing?.messages ?? []);
   const [error, setError] = useState<string | null>(null);
   const [isStreaming, setIsStreaming] = useState(false);
@@ -43,16 +43,6 @@ export function ChatPanel({ project }: ChatPanelProps) {
   const createdAtRef = useRef(existing?.createdAt ?? new Date().toISOString());
 
   const canChat = Boolean(project.transcript && chatProvider.apiKey.trim());
-
-  useEffect(() => {
-    abortRef.current?.abort();
-    const nextExisting = project.conversations[0];
-    setConversationId(nextExisting?.id ?? crypto.randomUUID());
-    setMessages(nextExisting?.messages ?? []);
-    setError(null);
-    setIsStreaming(false);
-    createdAtRef.current = nextExisting?.createdAt ?? new Date().toISOString();
-  }, [project.id]);
 
   useEffect(() => () => {
     abortRef.current?.abort();
