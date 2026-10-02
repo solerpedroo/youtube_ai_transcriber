@@ -1,0 +1,9 @@
+import { Bot, KeyRound, Monitor, ShieldCheck, Video } from "lucide-react";
+import { PhaseNotice } from "@/components/foundation/phase-notice";
+import { AppShell } from "@/components/layout/app-shell";
+
+const sections = [{ icon: Bot, title: "Provedor de IA", detail: "Configure o provedor e modelo para o chat." }, { icon: KeyRound, title: "Transcrição", detail: "Escolha o provedor de speech-to-text." }, { icon: Video, title: "Acesso ao YouTube", detail: "Use cookies.txt apenas para vídeos aos quais você tem acesso." }, { icon: Monitor, title: "Aparência", detail: "Escolha entre tema claro, escuro ou do sistema." }];
+
+export default function SettingsPage() {
+  return <AppShell><div className="mx-auto max-w-3xl"><p className="text-sm font-medium text-violet-700 dark:text-violet-300">Preferências locais</p><h1 className="mt-1 text-3xl font-semibold tracking-tight">Configurações</h1><p className="mt-2 text-zinc-600 dark:text-zinc-400">Controle como o aplicativo processa e utiliza seus vídeos.</p><div className="mt-8 overflow-hidden rounded-2xl border border-zinc-200 bg-white shadow-sm dark:border-zinc-800 dark:bg-zinc-900">{sections.map(({ icon: Icon, title, detail }) => <section className="flex gap-4 border-b border-zinc-100 p-5 last:border-b-0 dark:border-zinc-800" key={title}><span className="grid size-9 shrink-0 place-items-center rounded-lg bg-zinc-100 text-zinc-600 dark:bg-zinc-800 dark:text-zinc-300"><Icon className="size-4" /></span><div><h2 className="font-medium">{title}</h2><p className="mt-1 text-sm leading-6 text-zinc-600 dark:text-zinc-400">{detail}</p><span className="mt-2 inline-block text-xs font-medium text-zinc-400">Em breve</span></div></section>)}</div><div className="mt-6"><PhaseNotice><span className="inline-flex items-center gap-2"><ShieldCheck className="size-4" />Quando habilitadas, as chaves serão armazenadas apenas neste navegador e nunca serão registradas em logs.</span></PhaseNotice></div></div></AppShell>;
+}
