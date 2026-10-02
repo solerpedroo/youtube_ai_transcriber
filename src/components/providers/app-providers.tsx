@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, type ReactNode } from "react";
+import { ThemeSync } from "@/components/providers/theme-sync";
 import { useProjectStore } from "@/stores/project-store";
 import { useSettingsStore } from "@/stores/settings-store";
 
@@ -14,5 +15,10 @@ export function AppProviders({ children }: { children: ReactNode }) {
     hydrateSettings();
   }, [hydrateProjects, hydrateSettings]);
 
-  return children;
+  return (
+    <>
+      <ThemeSync />
+      {children}
+    </>
+  );
 }

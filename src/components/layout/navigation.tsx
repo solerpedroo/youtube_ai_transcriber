@@ -34,7 +34,7 @@ export function Navigation() {
                 aria-current={active ? "page" : undefined}
               >
                 <Icon className="size-4" />
-                <span className="hidden md:inline">{label}</span>
+                <span className="hidden sm:inline">{label}</span>
               </Link>
             );
           })}

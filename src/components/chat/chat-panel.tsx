@@ -54,6 +54,16 @@ export function ChatPanel({ project, onSeek }: ChatPanelProps) {
     listRef.current?.scrollTo({ top: listRef.current.scrollHeight, behavior: "smooth" });
   }, [messages, isStreaming]);
 
+  useEffect(() => {
+    function onKeyDown(event: KeyboardEvent) {
+      if (event.key === "Escape" && abortRef.current) {
+        abortRef.current.abort();
+      }
+    }
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, []);
+
   function persist(nextMessages: ChatMessage[]) {
     const now = new Date().toISOString();
     const firstUser = nextMessages.find((message) => message.role === "user");

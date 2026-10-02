@@ -1,3 +1,4 @@
+import { AppearanceForm } from "@/components/settings/appearance-form";
 import { ChatSettingsForm } from "@/components/settings/chat-settings-form";
 import { TranscriptionSettingsForm } from "@/components/settings/transcription-settings-form";
 import { YoutubeAccessForm } from "@/components/settings/youtube-access-form";
@@ -64,16 +65,20 @@ export default function SettingsPage() {
             </div>
           </section>
 
-          <section className="flex gap-4 p-5">
-            <span className="grid size-9 shrink-0 place-items-center rounded-lg bg-zinc-100 text-zinc-600 dark:bg-zinc-800 dark:text-zinc-300">
-              <Monitor className="size-4" />
-            </span>
-            <div>
-              <h2 className="font-medium">Aparência</h2>
-              <p className="mt-1 text-sm leading-6 text-zinc-600 dark:text-zinc-400">
-                Escolha entre tema claro, escuro ou do sistema.
-              </p>
-              <span className="mt-2 inline-block text-xs font-medium text-zinc-400">Em breve</span>
+          <section className="p-5">
+            <div className="flex gap-4">
+              <span className="grid size-9 shrink-0 place-items-center rounded-lg bg-zinc-100 text-zinc-600 dark:bg-zinc-800 dark:text-zinc-300">
+                <Monitor className="size-4" />
+              </span>
+              <div className="min-w-0 flex-1">
+                <h2 className="font-medium">Aparência</h2>
+                <p className="mt-1 text-sm leading-6 text-zinc-600 dark:text-zinc-400">
+                  Escolha entre tema claro, escuro ou do sistema.
+                </p>
+                <div className="mt-4">
+                  <AppearanceForm />
+                </div>
+              </div>
             </div>
           </section>
         </div>

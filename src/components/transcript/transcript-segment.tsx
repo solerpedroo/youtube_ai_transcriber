@@ -39,7 +39,9 @@ export function TranscriptSegmentRow({
       type="button"
       data-segment-id={segment.id}
       onClick={() => onSeek(segment.start)}
-      className={`grid w-full grid-cols-[4.5rem_minmax(0,1fr)] gap-3 rounded-lg px-2 py-2 text-left text-sm transition ${
+      aria-label={`Ir para ${formatTimestamp(segment.start)}`}
+      aria-current={active ? "true" : undefined}
+      className={`grid w-full grid-cols-[4.5rem_minmax(0,1fr)] gap-3 rounded-lg px-2 py-2 text-left text-sm transition focus-visible:outline-none ${
         active
           ? "bg-violet-100 text-violet-950 dark:bg-violet-950/50 dark:text-violet-100"
           : "hover:bg-zinc-100 dark:hover:bg-zinc-800/80"
