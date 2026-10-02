@@ -6,7 +6,9 @@ export type ApiErrorCode =
   | "YTDLP_UNAVAILABLE"
   | "PROCESS_UNAVAILABLE"
   | "METADATA_EXTRACTION_FAILED"
-  | "PROCESS_TIMEOUT";
+  | "PROCESS_TIMEOUT"
+  | "SUBTITLES_NOT_FOUND"
+  | "SUBTITLE_EXTRACTION_FAILED";
 
 export class AppError extends Error {
   constructor(
