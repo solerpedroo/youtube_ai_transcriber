@@ -5,7 +5,7 @@ const OPENAI_TRANSCRIPTIONS_URL = "https://api.openai.com/v1/audio/transcription
 
 export const openAiTranscriptionProvider: TranscriptionProvider = {
   id: "openai",
-  transcribe(filePath, options) {
-    return transcribeWithOpenAiCompatibleApi(OPENAI_TRANSCRIPTIONS_URL, filePath, options);
+  transcribe(filePath, options, signal) {
+    return transcribeWithOpenAiCompatibleApi(OPENAI_TRANSCRIPTIONS_URL, filePath, options, signal);
   },
 };
