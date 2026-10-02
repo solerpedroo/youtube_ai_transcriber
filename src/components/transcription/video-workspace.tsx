@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import {
   ArrowLeft,
@@ -74,11 +74,16 @@ export function VideoWorkspace({ projectId }: { projectId: string }) {
   const [progress, setProgress] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [isTranscribing, setIsTranscribing] = useState(false);
+  const abortRef = useRef<AbortController | null>(null);
 
   useEffect(() => {
     if (!hasHydratedProjects) hydrateProjects();
     if (!hasHydratedSettings) hydrateSettings();
   }, [hasHydratedProjects, hasHydratedSettings, hydrateProjects, hydrateSettings]);
+
+  useEffect(() => () => {
+    abortRef.current?.abort();
+  }, []);
 
   const project = useMemo(
     () => projects.find((item) => item.id === projectId) as VideoProject | undefined,
@@ -92,6 +97,10 @@ export function VideoWorkspace({ projectId }: { projectId: string }) {
       return;
     }
 
+    abortRef.current?.abort();
+    const abortController = new AbortController();
+    abortRef.current = abortController;
+
     setIsTranscribing(true);
     setError(null);
     setProgress("Preparando transcrição...");
@@ -100,6 +109,7 @@ export function VideoWorkspace({ projectId }: { projectId: string }) {
       const response = await fetch("/api/transcription/start", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
+        signal: abortController.signal,
         body: JSON.stringify({
           url: project.metadata.url,
           provider: transcriptionProvider.provider,
@@ -128,9 +138,14 @@ export function VideoWorkspace({ projectId }: { projectId: string }) {
       setTranscript(project.id, transcript);
       setProgress("Transcrição concluída.");
     } catch (requestError) {
+      if (abortController.signal.aborted) {
+        setProgress(null);
+        return;
+      }
       setError(requestError instanceof Error ? requestError.message : "Não foi possível transcrever o vídeo.");
       setProgress(null);
     } finally {
+      if (abortRef.current === abortController) abortRef.current = null;
       setIsTranscribing(false);
     }
   }
