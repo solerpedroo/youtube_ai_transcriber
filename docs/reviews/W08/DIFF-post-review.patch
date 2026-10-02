@@ -1,0 +1,878 @@
+diff --git a/docs/STATUS.md b/docs/STATUS.md
+index d9d4f85..a3ceeb9 100644
+--- a/docs/STATUS.md
++++ b/docs/STATUS.md
+@@ -1,8 +1,8 @@
+ # Status do projeto
+ 
+-- Wave: W07 — Transcript grounding (Fase 7)
+-- State: complete
++- Wave: W08 — Private YouTube (Fase 8)
++- State: in_progress
+ - Last completed: W07 — Transcript grounding (Fase 7)
+-- Next action: W08 — Private YouTube (cookies / yt-dlp autenticado).
++- Next action: W08 — cookies.txt temporários, yt-dlp autenticado e limpeza segura.
+ - Last review: docs/reviews/W07/REVIEW.md
+ - Updated: 2026-10-02
+diff --git a/src/app/api/transcription/start/route.ts b/src/app/api/transcription/start/route.ts
+index 002b763..1ffe852 100644
+--- a/src/app/api/transcription/start/route.ts
++++ b/src/app/api/transcription/start/route.ts
+@@ -2,6 +2,7 @@ import { z } from "zod";
+ import { isAppError } from "@/lib/utils/errors";
+ import { runTranscriptionPipeline } from "@/lib/transcription/pipeline";
+ import type { TranscriptionProgressEvent } from "@/lib/transcription/types";
++import { OptionalCookiesSchema } from "@/lib/youtube/cookies-schema";
+ import { TranscriptionProviderIdSchema } from "@/types";
+ 
+ export const runtime = "nodejs";
+@@ -18,6 +19,7 @@ const RequestSchema = z.object({
+   apiKey: z.string().trim().min(1).max(512),
+   model: z.string().trim().min(1).max(128),
+   language: LanguageSchema.optional(),
++  cookies: OptionalCookiesSchema,
+ });
+ 
+ function encodeEvent(event: TranscriptionProgressEvent): string {
+@@ -35,8 +37,15 @@ export async function POST(request: Request) {
+   const body = RequestSchema.safeParse(payload);
+   if (!body.success) {
+     const hasLanguageError = body.error.issues.some((issue) => issue.path[0] === "language");
++    const hasCookiesError = body.error.issues.some((issue) => issue.path[0] === "cookies");
+     const hasProviderError = body.error.issues.some((issue) =>
+       issue.path[0] === "provider" || issue.path[0] === "model" || issue.path[0] === "apiKey");
++    if (hasCookiesError) {
++      return Response.json({
++        code: "INVALID_COOKIES",
++        message: "O arquivo de cookies é inválido ou excede o tamanho permitido.",
++      }, { status: 400 });
++    }
+     if (hasLanguageError) {
+       return Response.json({ code: "INVALID_LANGUAGE", message: "Informe um código de idioma válido." }, { status: 400 });
+     }
+@@ -71,6 +80,7 @@ export async function POST(request: Request) {
+             apiKey: body.data.apiKey,
+             model: body.data.model,
+             language: body.data.language,
++            cookies: body.data.cookies,
+             signal: request.signal,
+             onProgress: (event) => send(event),
+           });
+diff --git a/src/app/api/youtube/metadata/route.ts b/src/app/api/youtube/metadata/route.ts
+index 284b8d2..79efd80 100644
+--- a/src/app/api/youtube/metadata/route.ts
++++ b/src/app/api/youtube/metadata/route.ts
+@@ -1,11 +1,23 @@
+ import { NextResponse } from "next/server";
+ import { z } from "zod";
+ import { isAppError } from "@/lib/utils/errors";
++import { OptionalCookiesSchema } from "@/lib/youtube/cookies-schema";
+ import { getVideoMetadata } from "@/lib/youtube/metadata";
+ 
+ export const runtime = "nodejs";
+ 
+-const RequestSchema = z.object({ url: z.string().trim().min(1).max(2_048) });
++const RequestSchema = z.object({
++  url: z.string().trim().min(1).max(2_048),
++  cookies: OptionalCookiesSchema,
++});
++
++function statusForCode(code: string): number {
++  if (code === "INVALID_URL" || code === "INVALID_COOKIES") return 400;
++  if (code === "YTDLP_UNAVAILABLE" || code === "PROCESS_UNAVAILABLE") return 503;
++  if (code === "VIDEO_NOT_FOUND") return 404;
++  if (code === "VIDEO_PRIVATE" || code === "AUTH_REQUIRED") return 403;
++  return 422;
++}
+ 
+ export async function POST(request: Request) {
+   let payload: unknown;
+@@ -18,14 +30,20 @@ export async function POST(request: Request) {
+   try {
+     const body = RequestSchema.safeParse(payload);
+     if (!body.success) {
++      const cookiesIssue = body.error.issues.some((issue) => issue.path[0] === "cookies");
++      if (cookiesIssue) {
++        return NextResponse.json({
++          code: "INVALID_COOKIES",
++          message: "O arquivo de cookies é inválido ou excede o tamanho permitido.",
++        }, { status: 400 });
++      }
+       return NextResponse.json({ code: "INVALID_URL", message: "Informe uma URL válida do YouTube." }, { status: 400 });
+     }
+ 
+-    return NextResponse.json(await getVideoMetadata(body.data.url));
++    return NextResponse.json(await getVideoMetadata(body.data.url, body.data.cookies));
+   } catch (error) {
+     if (isAppError(error)) {
+-      const status = error.code === "INVALID_URL" ? 400 : error.code === "YTDLP_UNAVAILABLE" || error.code === "PROCESS_UNAVAILABLE" ? 503 : error.code === "VIDEO_NOT_FOUND" ? 404 : error.code === "VIDEO_PRIVATE" || error.code === "AUTH_REQUIRED" ? 403 : 422;
+-      return NextResponse.json({ code: error.code, message: error.message }, { status });
++      return NextResponse.json({ code: error.code, message: error.message }, { status: statusForCode(error.code) });
+     }
+     return NextResponse.json({ code: "METADATA_EXTRACTION_FAILED", message: "Não foi possível obter os dados do vídeo." }, { status: 500 });
+   }
+diff --git a/src/app/api/youtube/subtitles/route.ts b/src/app/api/youtube/subtitles/route.ts
+index c7cdf4a..098884b 100644
+--- a/src/app/api/youtube/subtitles/route.ts
++++ b/src/app/api/youtube/subtitles/route.ts
+@@ -1,6 +1,7 @@
+ import { NextResponse } from "next/server";
+ import { z } from "zod";
+ import { isAppError } from "@/lib/utils/errors";
++import { OptionalCookiesSchema } from "@/lib/youtube/cookies-schema";
+ import { extractSubtitles } from "@/lib/youtube/subtitles";
+ 
+ export const runtime = "nodejs";
+@@ -13,10 +14,11 @@ const LanguageSchema = z.string().trim().regex(
+ const RequestSchema = z.object({
+   url: z.string().trim().min(1).max(2_048),
+   language: LanguageSchema.optional(),
++  cookies: OptionalCookiesSchema,
+ });
+ 
+ function statusForCode(code: string): number {
+-  if (code === "INVALID_URL" || code === "INVALID_LANGUAGE") return 400;
++  if (code === "INVALID_URL" || code === "INVALID_LANGUAGE" || code === "INVALID_COOKIES") return 400;
+   if (code === "YTDLP_UNAVAILABLE" || code === "PROCESS_UNAVAILABLE") return 503;
+   if (code === "VIDEO_NOT_FOUND" || code === "SUBTITLES_NOT_FOUND") return 404;
+   if (code === "VIDEO_PRIVATE" || code === "AUTH_REQUIRED") return 403;
+@@ -36,14 +38,21 @@ export async function POST(request: Request) {
+     const body = RequestSchema.safeParse(payload);
+     if (!body.success) {
+       const hasLanguageError = body.error.issues.some((issue) => issue.path[0] === "language");
++      const hasCookiesError = body.error.issues.some((issue) => issue.path[0] === "cookies");
+       const hasUrlError = body.error.issues.some((issue) => issue.path[0] === "url");
++      if (hasCookiesError) {
++        return NextResponse.json({
++          code: "INVALID_COOKIES",
++          message: "O arquivo de cookies é inválido ou excede o tamanho permitido.",
++        }, { status: 400 });
++      }
+       if (hasLanguageError && !hasUrlError) {
+         return NextResponse.json({ code: "INVALID_LANGUAGE", message: "Informe um código de idioma válido." }, { status: 400 });
+       }
+       return NextResponse.json({ code: "INVALID_URL", message: "Informe uma URL válida do YouTube." }, { status: 400 });
+     }
+ 
+-    return NextResponse.json(await extractSubtitles(body.data.url, body.data.language));
++    return NextResponse.json(await extractSubtitles(body.data.url, body.data.language, body.data.cookies));
+   } catch (error) {
+     if (isAppError(error)) {
+       return NextResponse.json({ code: error.code, message: error.message }, { status: statusForCode(error.code) });
+diff --git a/src/app/settings/page.tsx b/src/app/settings/page.tsx
+index fcd9642..731a885 100644
+--- a/src/app/settings/page.tsx
++++ b/src/app/settings/page.tsx
+@@ -1,5 +1,6 @@
+ import { ChatSettingsForm } from "@/components/settings/chat-settings-form";
+ import { TranscriptionSettingsForm } from "@/components/settings/transcription-settings-form";
++import { YoutubeAccessForm } from "@/components/settings/youtube-access-form";
+ import { PhaseNotice } from "@/components/foundation/phase-notice";
+ import { AppShell } from "@/components/layout/app-shell";
+ import { Bot, KeyRound, Monitor, ShieldCheck, Video } from "lucide-react";
+@@ -49,16 +50,17 @@ export default function SettingsPage() {
+             </div>
+           </section>
+ 
+-          <section className="flex gap-4 border-b border-zinc-100 p-5 dark:border-zinc-800">
+-            <span className="grid size-9 shrink-0 place-items-center rounded-lg bg-zinc-100 text-zinc-600 dark:bg-zinc-800 dark:text-zinc-300">
+-              <Video className="size-4" />
+-            </span>
+-            <div>
+-              <h2 className="font-medium">Acesso ao YouTube</h2>
+-              <p className="mt-1 text-sm leading-6 text-zinc-600 dark:text-zinc-400">
+-                Use cookies.txt apenas para vídeos aos quais você tem acesso.
+-              </p>
+-              <span className="mt-2 inline-block text-xs font-medium text-zinc-400">Em breve</span>
++          <section className="border-b border-zinc-100 p-5 dark:border-zinc-800">
++            <div className="flex gap-4">
++              <span className="grid size-9 shrink-0 place-items-center rounded-lg bg-zinc-100 text-zinc-600 dark:bg-zinc-800 dark:text-zinc-300">
++                <Video className="size-4" />
++              </span>
++              <div className="min-w-0 flex-1">
++                <h2 className="font-medium">Acesso ao YouTube</h2>
++                <div className="mt-4">
++                  <YoutubeAccessForm />
++                </div>
++              </div>
+             </div>
+           </section>
+ 
+@@ -80,7 +82,7 @@ export default function SettingsPage() {
+           <PhaseNotice>
+             <span className="inline-flex items-center gap-2">
+               <ShieldCheck className="size-4" />
+-              As chaves de chat e transcrição ficam apenas neste navegador e não devem ser registradas em logs do servidor.
++              Chaves e cookies ficam só no navegador (cookies só nesta sessão). O servidor nunca persiste cookies.txt.
+             </span>
+           </PhaseNotice>
+         </div>
+diff --git a/src/components/foundation/import-video-card.tsx b/src/components/foundation/import-video-card.tsx
+index 21326a5..8dd58f9 100644
+--- a/src/components/foundation/import-video-card.tsx
++++ b/src/components/foundation/import-video-card.tsx
+@@ -2,14 +2,16 @@
+ /* eslint-disable @next/next/no-img-element -- yt-dlp thumbnail hosts are dynamic; the API returns only validated HTTPS URLs. */
+ 
+ import { useState, type FormEvent } from "react";
++import Link from "next/link";
+ import { useRouter } from "next/navigation";
+ import { ArrowRight, ExternalLink, Info, Link2, LoaderCircle, Sparkles, X } from "lucide-react";
+ import type { Transcript, VideoMetadata } from "@/types";
+ import { Button } from "@/components/ui/button";
+ import { Input } from "@/components/ui/input";
+ import { useProjectStore } from "@/stores/project-store";
++import { useYoutubeCookiesStore } from "@/stores/youtube-cookies-store";
+ 
+-type ApiError = { message?: string };
++type ApiError = { code?: string; message?: string };
+ 
+ type SubtitlesResponse = {
+   videoId: string;
+@@ -24,12 +26,19 @@ function formatDuration(seconds: number): string {
+   return [hours, minutes, remaining].filter((value, index) => index > 0 || value > 0).map((value) => String(value).padStart(2, "0")).join(":");
+ }
+ 
+-async function fetchExistingSubtitles(videoUrl: string, videoId: string): Promise<Transcript | undefined> {
++async function fetchExistingSubtitles(
++  videoUrl: string,
++  videoId: string,
++  cookies?: string | null,
++): Promise<Transcript | undefined> {
+   try {
+     const response = await fetch("/api/youtube/subtitles", {
+       method: "POST",
+       headers: { "Content-Type": "application/json" },
+-      body: JSON.stringify({ url: videoUrl }),
++      body: JSON.stringify({
++        url: videoUrl,
++        ...(cookies ? { cookies } : {}),
++      }),
+     });
+     if (!response.ok) return undefined;
+     const body = await response.json() as SubtitlesResponse;
+@@ -50,25 +59,35 @@ async function fetchExistingSubtitles(videoUrl: string, videoId: string): Promis
+ export function ImportVideoCard() {
+   const router = useRouter();
+   const addProject = useProjectStore((state) => state.addProject);
++  const cookiesText = useYoutubeCookiesStore((state) => state.cookiesText);
+   const [url, setUrl] = useState("");
+   const [metadata, setMetadata] = useState<VideoMetadata | null>(null);
+   const [error, setError] = useState<string | null>(null);
++  const [needsAuth, setNeedsAuth] = useState(false);
+   const [isLoading, setIsLoading] = useState(false);
+   const [isCreating, setIsCreating] = useState(false);
+ 
+   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
+     event.preventDefault();
+     setError(null);
++    setNeedsAuth(false);
+     setMetadata(null);
+     setIsLoading(true);
+     try {
+       const response = await fetch("/api/youtube/metadata", {
+         method: "POST",
+         headers: { "Content-Type": "application/json" },
+-        body: JSON.stringify({ url }),
++        body: JSON.stringify({
++          url,
++          ...(cookiesText ? { cookies: cookiesText } : {}),
++        }),
+       });
+       const body = await response.json() as VideoMetadata | ApiError;
+-      if (!response.ok) throw new Error("message" in body ? body.message : "Não foi possível carregar o vídeo.");
++      if (!response.ok) {
++        const code = "code" in body ? body.code : undefined;
++        if (code === "VIDEO_PRIVATE" || code === "AUTH_REQUIRED") setNeedsAuth(true);
++        throw new Error("message" in body && body.message ? body.message : "Não foi possível carregar o vídeo.");
++      }
+       setMetadata(body as VideoMetadata);
+     } catch (requestError) {
+       setError(requestError instanceof Error ? requestError.message : "Não foi possível carregar o vídeo.");
+@@ -84,7 +103,7 @@ export function ImportVideoCard() {
+     try {
+       const timestamp = new Date().toISOString();
+       const id = crypto.randomUUID();
+-      const transcript = await fetchExistingSubtitles(metadata.url, metadata.videoId);
++      const transcript = await fetchExistingSubtitles(metadata.url, metadata.videoId, cookiesText);
+       addProject({
+         id,
+         metadata,
+@@ -135,9 +154,16 @@ export function ImportVideoCard() {
+           </div>
+         </form>
+         {error && (
+-          <p className="mt-4 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700 dark:border-red-950 dark:bg-red-950/30 dark:text-red-300" role="alert">
+-            {error}
+-          </p>
++          <div className="mt-4 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700 dark:border-red-950 dark:bg-red-950/30 dark:text-red-300" role="alert">
++            <p>{error}</p>
++            {needsAuth && (
++              <p className="mt-2 text-red-600 dark:text-red-200">
++                Se você tem acesso legítimo, envie um cookies.txt em{" "}
++                <Link href="/settings" className="underline">Configurações → Acesso ao YouTube</Link>
++                {" "}e tente novamente.
++              </p>
++            )}
++          </div>
+         )}
+         {metadata && (
+           <div className="mt-6 overflow-hidden rounded-xl border border-zinc-200 bg-zinc-50 dark:border-zinc-800 dark:bg-zinc-950">
+diff --git a/src/components/settings/youtube-access-form.tsx b/src/components/settings/youtube-access-form.tsx
+new file mode 100644
+index 0000000..7aba55a
+--- /dev/null
++++ b/src/components/settings/youtube-access-form.tsx
+@@ -0,0 +1,78 @@
++"use client";
++
++import { useRef, useState, type ChangeEvent } from "react";
++import { FileUp, Trash2 } from "lucide-react";
++import { Button } from "@/components/ui/button";
++import { MAX_COOKIES_BYTES, validateNetscapeCookies } from "@/lib/youtube/cookies-validate";
++import { useYoutubeCookiesStore } from "@/stores/youtube-cookies-store";
++
++export function YoutubeAccessForm() {
++  const cookiesText = useYoutubeCookiesStore((state) => state.cookiesText);
++  const fileName = useYoutubeCookiesStore((state) => state.fileName);
++  const setCookies = useYoutubeCookiesStore((state) => state.setCookies);
++  const clearCookies = useYoutubeCookiesStore((state) => state.clearCookies);
++  const inputRef = useRef<HTMLInputElement | null>(null);
++  const [error, setError] = useState<string | null>(null);
++
++  async function handleFile(event: ChangeEvent<HTMLInputElement>) {
++    const file = event.target.files?.[0];
++    event.target.value = "";
++    if (!file) return;
++
++    if (file.size > MAX_COOKIES_BYTES) {
++      setError("O arquivo de cookies excede o tamanho máximo permitido (1 MB).");
++      return;
++    }
++
++    try {
++      const text = await file.text();
++      validateNetscapeCookies(text);
++      setCookies(text, file.name || "cookies.txt");
++      setError(null);
++    } catch (readError) {
++      setError(readError instanceof Error ? readError.message : "Não foi possível ler o arquivo de cookies.");
++    }
++  }
++
++  return (
++    <div className="space-y-3">
++      <p className="text-sm leading-6 text-zinc-600 dark:text-zinc-400">
++        Envie um <code className="rounded bg-zinc-100 px-1 dark:bg-zinc-800">cookies.txt</code> no formato Netscape
++        apenas para vídeos aos quais você tem acesso. O arquivo fica só nesta sessão do navegador — nunca no
++        localStorage — e o servidor apaga a cópia temporária após cada job.
++      </p>
++
++      <div className="flex flex-wrap items-center gap-2">
++        <input
++          ref={inputRef}
++          type="file"
++          accept=".txt,text/plain"
++          className="sr-only"
++          onChange={(event) => void handleFile(event)}
++        />
++        <Button type="button" variant="outline" onClick={() => inputRef.current?.click()}>
++          <FileUp className="size-4" />
++          {cookiesText ? "Trocar cookies.txt" : "Enviar cookies.txt"}
++        </Button>
++        {cookiesText && (
++          <Button type="button" variant="ghost" onClick={() => { clearCookies(); setError(null); }}>
++            <Trash2 className="size-4" />
++            Remover da sessão
++          </Button>
++        )}
++      </div>
++
++      {cookiesText && fileName && (
++        <p className="text-sm text-emerald-700 dark:text-emerald-300" role="status">
++          Cookies carregados nesta sessão: <span className="font-medium">{fileName}</span>
++        </p>
++      )}
++
++      {error && (
++        <p className="rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700 dark:border-red-950 dark:bg-red-950/30 dark:text-red-300" role="alert">
++          {error}
++        </p>
++      )}
++    </div>
++  );
++}
+diff --git a/src/components/transcription/video-workspace.tsx b/src/components/transcription/video-workspace.tsx
+index c7aa935..532a17c 100644
+--- a/src/components/transcription/video-workspace.tsx
++++ b/src/components/transcription/video-workspace.tsx
+@@ -14,6 +14,7 @@ import { VideoHeader } from "@/components/video/video-header";
+ import { YoutubePlayer, type YoutubePlayerHandle } from "@/components/video/youtube-player";
+ import { useProjectStore } from "@/stores/project-store";
+ import { useSettingsStore } from "@/stores/settings-store";
++import { useYoutubeCookiesStore } from "@/stores/youtube-cookies-store";
+ 
+ type WorkspaceTab = "video" | "transcript" | "chat";
+ 
+@@ -57,6 +58,7 @@ export function VideoWorkspace({ projectId }: { projectId: string }) {
+   const hasHydratedSettings = useSettingsStore((state) => state.hasHydrated);
+   const hydrateSettings = useSettingsStore((state) => state.hydrate);
+   const transcriptionProvider = useSettingsStore((state) => state.settings.transcriptionProvider);
++  const cookiesText = useYoutubeCookiesStore((state) => state.cookiesText);
+ 
+   const [progress, setProgress] = useState<string | null>(null);
+   const [error, setError] = useState<string | null>(null);
+@@ -110,6 +112,7 @@ export function VideoWorkspace({ projectId }: { projectId: string }) {
+           provider: transcriptionProvider.provider,
+           apiKey: transcriptionProvider.apiKey,
+           model: transcriptionProvider.model,
++          ...(cookiesText ? { cookies: cookiesText } : {}),
+         }),
+       });
+ 
+@@ -276,7 +279,7 @@ export function VideoWorkspace({ projectId }: { projectId: string }) {
+ 
+       <div className="mt-6">
+         <PhaseNotice>
+-          Fase 7: chat grounded na transcrição com retrieval por trechos e citações clicáveis [m:ss].
++          Fase 8: cookies.txt de sessão para vídeos privados/autenticados; o servidor apaga o arquivo após cada job.
+         </PhaseNotice>
+       </div>
+     </AppShell>
+diff --git a/src/lib/transcription/pipeline.ts b/src/lib/transcription/pipeline.ts
+index baf2bb0..29580ef 100644
+--- a/src/lib/transcription/pipeline.ts
++++ b/src/lib/transcription/pipeline.ts
+@@ -22,6 +22,8 @@ export type RunTranscriptionInput = {
+   apiKey: string;
+   model: string;
+   language?: string;
++  /** Netscape cookies.txt contents; never persisted — written only into the job temp dir. */
++  cookies?: string;
+   concurrency?: number;
+   signal?: AbortSignal;
+   onProgress?: (event: Extract<TranscriptionProgressEvent, { type: "status" }>) => void;
+@@ -75,7 +77,7 @@ export async function runTranscriptionPipeline(input: RunTranscriptionInput): Pr
+ 
+   try {
+     emit?.({ type: "status", status: "downloading_audio", message: "Baixando áudio do YouTube..." });
+-    const sourcePath = await extractAudio(input.url, jobDirectory);
++    const sourcePath = await extractAudio(input.url, jobDirectory, input.cookies);
+     assertNotAborted(signal);
+ 
+     emit?.({ type: "status", status: "processing_audio", message: "Normalizando áudio..." });
+diff --git a/src/lib/utils/errors.ts b/src/lib/utils/errors.ts
+index 65fcfae..19e0d68 100644
+--- a/src/lib/utils/errors.ts
++++ b/src/lib/utils/errors.ts
+@@ -3,6 +3,7 @@ export type ApiErrorCode =
+   | "VIDEO_NOT_FOUND"
+   | "VIDEO_PRIVATE"
+   | "AUTH_REQUIRED"
++  | "INVALID_COOKIES"
+   | "YTDLP_UNAVAILABLE"
+   | "PROCESS_UNAVAILABLE"
+   | "METADATA_EXTRACTION_FAILED"
+diff --git a/src/lib/youtube/cookies-schema.ts b/src/lib/youtube/cookies-schema.ts
+new file mode 100644
+index 0000000..861df2a
+--- /dev/null
++++ b/src/lib/youtube/cookies-schema.ts
+@@ -0,0 +1,5 @@
++import { z } from "zod";
++import { MAX_COOKIES_BYTES } from "./cookies-validate";
++
++/** Optional Netscape cookies.txt body field shared by YouTube API routes. */
++export const OptionalCookiesSchema = z.string().max(MAX_COOKIES_BYTES).optional();
+diff --git a/src/lib/youtube/cookies-validate.ts b/src/lib/youtube/cookies-validate.ts
+new file mode 100644
+index 0000000..d671526
+--- /dev/null
++++ b/src/lib/youtube/cookies-validate.ts
+@@ -0,0 +1,43 @@
++import { AppError } from "@/lib/utils/errors";
++
++/** Soft cap keeps request bodies and temp files bounded. */
++export const MAX_COOKIES_BYTES = 1_048_576;
++
++/**
++ * Validates a Netscape-format cookies.txt payload.
++ * Safe for browser and server. Never log the returned content.
++ */
++export function validateNetscapeCookies(raw: string): string {
++  if (typeof raw !== "string" || !raw.trim()) {
++    throw new AppError("INVALID_COOKIES", "Envie um arquivo cookies.txt no formato Netscape.");
++  }
++
++  const normalized = raw.replace(/\r\n/g, "\n");
++  const byteLength = typeof Buffer !== "undefined"
++    ? Buffer.byteLength(normalized, "utf8")
++    : new TextEncoder().encode(normalized).length;
++
++  if (byteLength > MAX_COOKIES_BYTES) {
++    throw new AppError("INVALID_COOKIES", "O arquivo de cookies excede o tamanho máximo permitido (1 MB).");
++  }
++
++  const lines = normalized.split("\n").map((line) => line.trimEnd()).filter((line) => line.length > 0);
++  const cookieLines = lines.filter((line) => !line.startsWith("#"));
++  if (cookieLines.length === 0) {
++    throw new AppError("INVALID_COOKIES", "O arquivo de cookies não contém entradas utilizáveis.");
++  }
++
++  const netscapeLines = cookieLines.filter((line) => {
++    const parts = line.split("\t");
++    return parts.length >= 7 && parts[0]!.length > 0 && parts[5]!.length > 0;
++  });
++
++  if (netscapeLines.length === 0) {
++    throw new AppError(
++      "INVALID_COOKIES",
++      "O arquivo precisa estar no formato Netscape (campos separados por tab).",
++    );
++  }
++
++  return normalized;
++}
+diff --git a/src/lib/youtube/cookies.test.ts b/src/lib/youtube/cookies.test.ts
+new file mode 100644
+index 0000000..3c52cb1
+--- /dev/null
++++ b/src/lib/youtube/cookies.test.ts
+@@ -0,0 +1,50 @@
++import { access, readFile } from "node:fs/promises";
++import { describe, expect, it } from "vitest";
++import {
++  withCookiesArg,
++  withTemporaryCookies,
++  writeCookiesFile,
++} from "./cookies";
++import { validateNetscapeCookies } from "./cookies-validate";
++import { createJobDirectory, removeJobDirectory } from "./temp";
++
++const SAMPLE = [
++  "# Netscape HTTP Cookie File",
++  ".youtube.com\tTRUE\t/\tTRUE\t2147483647\tSID\tabc123",
++  ".youtube.com\tTRUE\t/\tFALSE\t2147483647\tPREF\tf1=500",
++].join("\n");
++
++describe("validateNetscapeCookies", () => {
++  it("accepts Netscape cookie files with tab-separated fields", () => {
++    expect(validateNetscapeCookies(SAMPLE)).toContain("SID\tabc123");
++  });
++
++  it("rejects empty, oversized, or non-Netscape payloads", () => {
++    expect(() => validateNetscapeCookies("")).toThrow(/cookies\.txt/);
++    expect(() => validateNetscapeCookies("just-a-token")).toThrow(/Netscape/);
++    expect(() => validateNetscapeCookies("a".repeat(1_048_577))).toThrow(/tamanho máximo/);
++  });
++});
++
++describe("cookie helpers", () => {
++  it("writes cookies with restrictive permissions and cleans temporary dirs", async () => {
++    const directory = await createJobDirectory();
++    const path = await writeCookiesFile(directory, SAMPLE);
++    await expect(readFile(path, "utf8")).resolves.toContain("PREF\tf1=500");
++    await expect(removeJobDirectory(directory)).resolves.toBe(true);
++    await expect(access(path)).rejects.toThrow();
++  });
++
++  it("inserts --cookies before the trailing URL", () => {
++    expect(withCookiesArg(["--skip-download", "https://youtu.be/abc"], "/tmp/cookies.txt")).toEqual([
++      "--skip-download",
++      "--cookies",
++      "/tmp/cookies.txt",
++      "https://youtu.be/abc",
++    ]);
++  });
++
++  it("runs work without creating a directory when cookies are absent", async () => {
++    await expect(withTemporaryCookies(undefined, async (path) => path)).resolves.toBeUndefined();
++  });
++});
+diff --git a/src/lib/youtube/cookies.ts b/src/lib/youtube/cookies.ts
+new file mode 100644
+index 0000000..e77056d
+--- /dev/null
++++ b/src/lib/youtube/cookies.ts
+@@ -0,0 +1,42 @@
++import { writeFile } from "node:fs/promises";
++import { join } from "node:path";
++import { createJobDirectory, removeJobDirectory } from "./temp";
++import { validateNetscapeCookies } from "./cookies-validate";
++
++export { MAX_COOKIES_BYTES, validateNetscapeCookies } from "./cookies-validate";
++
++/** Writes cookies into an existing job directory with restrictive permissions. */
++export async function writeCookiesFile(jobDirectory: string, cookiesText: string): Promise<string> {
++  const validated = validateNetscapeCookies(cookiesText);
++  const cookiesPath = join(jobDirectory, "cookies.txt");
++  await writeFile(cookiesPath, validated, { encoding: "utf8", mode: 0o600 });
++  return cookiesPath;
++}
++
++/** Inserts `--cookies <path>` immediately before the trailing URL argument. */
++export function withCookiesArg(args: readonly string[], cookiesPath?: string): string[] {
++  if (!cookiesPath) return [...args];
++  if (args.length === 0) return ["--cookies", cookiesPath];
++  return [...args.slice(0, -1), "--cookies", cookiesPath, args[args.length - 1]!];
++}
++
++/**
++ * Runs work with an optional temporary cookies file that is always deleted afterward.
++ * Prefer writing into an existing job directory when one already exists.
++ */
++export async function withTemporaryCookies<T>(
++  cookiesText: string | undefined,
++  run: (cookiesPath: string | undefined) => Promise<T>,
++): Promise<T> {
++  if (!cookiesText?.trim()) {
++    return run(undefined);
++  }
++
++  const jobDirectory = await createJobDirectory();
++  try {
++    const cookiesPath = await writeCookiesFile(jobDirectory, cookiesText);
++    return await run(cookiesPath);
++  } finally {
++    await removeJobDirectory(jobDirectory);
++  }
++}
+diff --git a/src/lib/youtube/downloader.ts b/src/lib/youtube/downloader.ts
+index db55f93..f3a9a8d 100644
+--- a/src/lib/youtube/downloader.ts
++++ b/src/lib/youtube/downloader.ts
+@@ -1,6 +1,7 @@
+ import { readdir } from "node:fs/promises";
+ import { join } from "node:path";
+ import { AppError } from "@/lib/utils/errors";
++import { withCookiesArg, writeCookiesFile } from "./cookies";
+ import { runProcess } from "./process";
+ import { YouTubeUrlSchema } from "./url";
+ 
+@@ -44,23 +45,31 @@ async function findDownloadedAudio(jobDirectory: string): Promise<string> {
+ }
+ 
+ /** Downloads audio only into the job directory. Caller owns cleanup. */
+-export async function extractAudio(inputUrl: string, jobDirectory: string): Promise<string> {
++export async function extractAudio(
++  inputUrl: string,
++  jobDirectory: string,
++  cookiesText?: string,
++): Promise<string> {
+   const urlResult = YouTubeUrlSchema.safeParse(inputUrl);
+   if (!urlResult.success) {
+     throw new AppError("INVALID_URL", "Informe uma URL válida de vídeo do YouTube.");
+   }
+ 
++  const cookiesPath = cookiesText?.trim()
++    ? await writeCookiesFile(jobDirectory, cookiesText)
++    : undefined;
++
+   try {
+     await runProcess(
+       "yt-dlp",
+-      [
++      withCookiesArg([
+         "-f", "bestaudio/bestaudio*/best",
+         "--no-playlist",
+         "--no-warnings",
+         "-o", "source.%(ext)s",
+         "--paths", jobDirectory,
+         urlResult.data.url,
+-      ],
++      ], cookiesPath),
+       {
+         unavailableCode: "YTDLP_UNAVAILABLE",
+         failureCode: "AUDIO_EXTRACTION_FAILED",
+diff --git a/src/lib/youtube/metadata.ts b/src/lib/youtube/metadata.ts
+index 35fb832..53a6eaf 100644
+--- a/src/lib/youtube/metadata.ts
++++ b/src/lib/youtube/metadata.ts
+@@ -1,6 +1,7 @@
+ import { z } from "zod";
+ import type { VideoMetadata } from "@/types";
+ import { AppError } from "@/lib/utils/errors";
++import { withCookiesArg, withTemporaryCookies } from "./cookies";
+ import { runProcess } from "./process";
+ import { YouTubeUrlSchema } from "./url";
+ 
+@@ -46,28 +47,31 @@ function mapMetadataFailure(error: AppError): AppError {
+   return error;
+ }
+ 
+-export async function getVideoMetadata(inputUrl: string): Promise<VideoMetadata> {
++export async function getVideoMetadata(inputUrl: string, cookiesText?: string): Promise<VideoMetadata> {
+   const urlResult = YouTubeUrlSchema.safeParse(inputUrl);
+   if (!urlResult.success) {
+     throw new AppError("INVALID_URL", "Informe uma URL válida de vídeo do YouTube.");
+   }
+   const validated = urlResult.data;
+-  let result;
+-  try {
+-    result = await runProcess(
+-      "yt-dlp",
+-      ["--dump-single-json", "--skip-download", "--no-playlist", validated.url],
+-      { unavailableCode: "YTDLP_UNAVAILABLE" },
+-    );
+-  } catch (error) {
+-    if (error instanceof AppError) throw mapMetadataFailure(error);
+-    throw error;
+-  }
+ 
+-  try {
+-    return normalizeVideoMetadata(JSON.parse(result.stdout), validated.url);
+-  } catch (error) {
+-    if (error instanceof AppError) throw error;
+-    throw new AppError("METADATA_EXTRACTION_FAILED", "Não foi possível interpretar os dados do vídeo.");
+-  }
++  return withTemporaryCookies(cookiesText, async (cookiesPath) => {
++    let result;
++    try {
++      result = await runProcess(
++        "yt-dlp",
++        withCookiesArg(["--dump-single-json", "--skip-download", "--no-playlist", validated.url], cookiesPath),
++        { unavailableCode: "YTDLP_UNAVAILABLE" },
++      );
++    } catch (error) {
++      if (error instanceof AppError) throw mapMetadataFailure(error);
++      throw error;
++    }
++
++    try {
++      return normalizeVideoMetadata(JSON.parse(result.stdout), validated.url);
++    } catch (error) {
++      if (error instanceof AppError) throw error;
++      throw new AppError("METADATA_EXTRACTION_FAILED", "Não foi possível interpretar os dados do vídeo.");
++    }
++  });
+ }
+diff --git a/src/lib/youtube/subtitles.ts b/src/lib/youtube/subtitles.ts
+index ec9e757..6ce254f 100644
+--- a/src/lib/youtube/subtitles.ts
++++ b/src/lib/youtube/subtitles.ts
+@@ -4,6 +4,7 @@ import { z } from "zod";
+ import type { Transcript, TranscriptSegment } from "@/types";
+ import { AppError } from "@/lib/utils/errors";
+ import { buildFullText, normalizeSubtitleSegments } from "./normalize-segments";
++import { withCookiesArg, writeCookiesFile } from "./cookies";
+ import { runProcess } from "./process";
+ import type { SelectedSubtitle, SubtitleKind, SubtitleTrack } from "./subtitle-types";
+ import { createJobDirectory, removeJobDirectory } from "./temp";
+@@ -136,6 +137,7 @@ async function downloadSubtitleFile(
+   url: string,
+   selected: SelectedSubtitle,
+   jobDirectory: string,
++  cookiesPath?: string,
+ ): Promise<string> {
+   if (!/^[A-Za-z0-9._-]+$/.test(selected.language)) {
+     throw new AppError("SUBTITLE_EXTRACTION_FAILED", "O idioma de legenda retornado é inválido.");
+@@ -144,7 +146,7 @@ async function downloadSubtitleFile(
+   try {
+     await runProcess(
+       "yt-dlp",
+-      [
++      withCookiesArg([
+         "--skip-download",
+         "--no-playlist",
+         writeFlag,
+@@ -154,7 +156,7 @@ async function downloadSubtitleFile(
+         "-o", "subtitle.%(ext)s",
+         "--paths", jobDirectory,
+         url,
+-      ],
++      ], cookiesPath),
+       { unavailableCode: "YTDLP_UNAVAILABLE", timeoutMs: 120_000 },
+     );
+   } catch (error) {
+@@ -164,7 +166,10 @@ async function downloadSubtitleFile(
+   return readDownloadedVtt(jobDirectory);
+ }
+ 
+-export async function detectSubtitleTracks(inputUrl: string): Promise<{ videoId: string; available: SubtitleTrack[] }> {
++export async function detectSubtitleTracks(
++  inputUrl: string,
++  cookiesPath?: string,
++): Promise<{ videoId: string; available: SubtitleTrack[] }> {
+   const urlResult = YouTubeUrlSchema.safeParse(inputUrl);
+   if (!urlResult.success) {
+     throw new AppError("INVALID_URL", "Informe uma URL válida de vídeo do YouTube.");
+@@ -174,7 +179,10 @@ export async function detectSubtitleTracks(inputUrl: string): Promise<{ videoId:
+   try {
+     result = await runProcess(
+       "yt-dlp",
+-      ["--dump-single-json", "--skip-download", "--no-playlist", urlResult.data.url],
++      withCookiesArg(
++        ["--dump-single-json", "--skip-download", "--no-playlist", urlResult.data.url],
++        cookiesPath,
++      ),
+       { unavailableCode: "YTDLP_UNAVAILABLE" },
+     );
+   } catch (error) {
+@@ -193,26 +201,30 @@ export async function detectSubtitleTracks(inputUrl: string): Promise<{ videoId:
+ export async function extractSubtitles(
+   inputUrl: string,
+   preferredLanguage?: string,
++  cookiesText?: string,
+ ): Promise<SubtitlesResult> {
+   const urlResult = YouTubeUrlSchema.safeParse(inputUrl);
+   if (!urlResult.success) {
+     throw new AppError("INVALID_URL", "Informe uma URL válida de vídeo do YouTube.");
+   }
+ 
+-  const detected = await detectSubtitleTracks(urlResult.data.url);
+-  const selected = selectSubtitleTrack(detected.available, preferredLanguage);
+-  if (!selected) {
+-    return {
+-      videoId: detected.videoId,
+-      available: detected.available,
+-      selected: null,
+-      transcript: null,
+-    };
+-  }
+-
+   const jobDirectory = await createJobDirectory();
+   try {
+-    const vtt = await downloadSubtitleFile(urlResult.data.url, selected, jobDirectory);
++    const cookiesPath = cookiesText?.trim()
++      ? await writeCookiesFile(jobDirectory, cookiesText)
++      : undefined;
++    const detected = await detectSubtitleTracks(urlResult.data.url, cookiesPath);
++    const selected = selectSubtitleTrack(detected.available, preferredLanguage);
++    if (!selected) {
++      return {
++        videoId: detected.videoId,
++        available: detected.available,
++        selected: null,
++        transcript: null,
++      };
++    }
++
++    const vtt = await downloadSubtitleFile(urlResult.data.url, selected, jobDirectory, cookiesPath);
+     const segments = normalizeSubtitleSegments(parseVtt(vtt));
+     if (segments.length === 0) {
+       throw new AppError("SUBTITLES_NOT_FOUND", "Nenhuma legenda utilizável foi encontrada para este vídeo.");
+diff --git a/src/stores/youtube-cookies-store.ts b/src/stores/youtube-cookies-store.ts
+new file mode 100644
+index 0000000..339dc60
+--- /dev/null
++++ b/src/stores/youtube-cookies-store.ts
+@@ -0,0 +1,19 @@
++import { create } from "zustand";
++
++/**
++ * Session-only YouTube cookies. Never written to localStorage/sessionStorage.
++ * Cleared on full page reload by design.
++ */
++type YoutubeCookiesStore = {
++  cookiesText: string | null;
++  fileName: string | null;
++  setCookies: (cookiesText: string, fileName: string) => void;
++  clearCookies: () => void;
++};
++
++export const useYoutubeCookiesStore = create<YoutubeCookiesStore>((set) => ({
++  cookiesText: null,
++  fileName: null,
++  setCookies: (cookiesText, fileName) => set({ cookiesText, fileName }),
++  clearCookies: () => set({ cookiesText: null, fileName: null }),
++}));
