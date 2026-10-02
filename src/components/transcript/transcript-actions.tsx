@@ -29,13 +29,23 @@ const EXPORTS = [
 
 export function TranscriptActions({ metadata, transcript }: TranscriptActionsProps) {
   const [copied, setCopied] = useState(false);
+  const [copyError, setCopyError] = useState<string | null>(null);
   const baseName = slugifyFilename(metadata.title);
 
   async function copyTranscript() {
+    setCopyError(null);
     const text = exportTranscriptTxt({ metadata, transcript });
-    await navigator.clipboard.writeText(text);
-    setCopied(true);
-    window.setTimeout(() => setCopied(false), 1_500);
+    try {
+      if (!navigator.clipboard?.writeText) {
+        throw new Error("A área de transferência não está disponível neste navegador.");
+      }
+      await navigator.clipboard.writeText(text);
+      setCopied(true);
+      window.setTimeout(() => setCopied(false), 1_500);
+    } catch (error) {
+      setCopied(false);
+      setCopyError(error instanceof Error ? error.message : "Não foi possível copiar a transcrição.");
+    }
   }
 
   function exportAs(kind: (typeof EXPORTS)[number]["id"]) {
@@ -54,25 +64,30 @@ export function TranscriptActions({ metadata, transcript }: TranscriptActionsPro
   }
 
   return (
-    <div className="flex flex-wrap items-center gap-2">
-      <Button type="button" size="sm" variant="outline" onClick={() => void copyTranscript()}>
-        {copied ? <Check className="size-4" /> : <Copy className="size-4" />}
-        {copied ? "Copiado" : "Copiar"}
-      </Button>
-      <div className="flex flex-wrap gap-1">
-        {EXPORTS.map((item) => (
-          <Button
-            key={item.id}
-            type="button"
-            size="sm"
-            variant="ghost"
-            onClick={() => exportAs(item.id)}
-          >
-            <Download className="size-3.5" />
-            {item.label}
-          </Button>
-        ))}
+    <div className="flex flex-col items-start gap-2">
+      <div className="flex flex-wrap items-center gap-2">
+        <Button type="button" size="sm" variant="outline" onClick={() => void copyTranscript()}>
+          {copied ? <Check className="size-4" /> : <Copy className="size-4" />}
+          {copied ? "Copiado" : "Copiar"}
+        </Button>
+        <div className="flex flex-wrap gap-1">
+          {EXPORTS.map((item) => (
+            <Button
+              key={item.id}
+              type="button"
+              size="sm"
+              variant="ghost"
+              onClick={() => exportAs(item.id)}
+            >
+              <Download className="size-3.5" />
+              {item.label}
+            </Button>
+          ))}
+        </div>
       </div>
+      {copyError && (
+        <p className="text-xs text-red-600 dark:text-red-300" role="alert">{copyError}</p>
+      )}
     </div>
   );
 }
