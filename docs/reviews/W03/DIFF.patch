@@ -1,0 +1,842 @@
+diff --git a/README.md b/README.md
+index 7509e6d..3fb7220 100644
+--- a/README.md
++++ b/README.md
+@@ -9,7 +9,7 @@ npm install
+ npm run dev
+ ```
+ 
+-Para carregar metadata e, nas próximas fases, processar áudio, instale `yt-dlp` e `ffmpeg` no `PATH` da máquina que executa o Next.js. A aplicação não baixa nem persiste arquivos de vídeo ou áudio permanentemente.
++Para carregar metadata, legendas e, nas próximas fases, processar áudio, instale `yt-dlp` e `ffmpeg` no `PATH` da máquina que executa o Next.js. A aplicação não baixa nem persiste arquivos de vídeo ou áudio permanentemente. Legendas existentes do YouTube são preferidas antes da transcrição por áudio.
+ 
+ ```powershell
+ npm test
+diff --git a/docs/STATUS.md b/docs/STATUS.md
+index d7c249d..df839cd 100644
+--- a/docs/STATUS.md
++++ b/docs/STATUS.md
+@@ -1,7 +1,7 @@
+ # Status do projeto
+ 
+ - Wave: W03 — Captions (Fase 3)
+-- State: complete
++- State: in_progress
+ - Last completed: W02 — YouTube (Fase 2)
+ - Next action: W03 — implementar detecção, extração e normalização de legendas.
+ - Last review: docs/reviews/W02/REVIEW.md
+diff --git a/src/app/api/youtube/subtitles/route.ts b/src/app/api/youtube/subtitles/route.ts
+new file mode 100644
+index 0000000..d50c276
+--- /dev/null
++++ b/src/app/api/youtube/subtitles/route.ts
+@@ -0,0 +1,43 @@
++import { NextResponse } from "next/server";
++import { z } from "zod";
++import { isAppError } from "@/lib/utils/errors";
++import { extractSubtitles } from "@/lib/youtube/subtitles";
++
++export const runtime = "nodejs";
++
++const RequestSchema = z.object({
++  url: z.string().trim().min(1).max(2_048),
++  language: z.string().trim().min(2).max(16).optional(),
++});
++
++function statusForCode(code: string): number {
++  if (code === "INVALID_URL") return 400;
++  if (code === "YTDLP_UNAVAILABLE" || code === "PROCESS_UNAVAILABLE") return 503;
++  if (code === "VIDEO_NOT_FOUND" || code === "SUBTITLES_NOT_FOUND") return 404;
++  if (code === "VIDEO_PRIVATE" || code === "AUTH_REQUIRED") return 403;
++  if (code === "PROCESS_TIMEOUT") return 504;
++  return 422;
++}
++
++export async function POST(request: Request) {
++  let payload: unknown;
++  try {
++    payload = await request.json();
++  } catch {
++    return NextResponse.json({ code: "INVALID_URL", message: "Envie um corpo JSON válido." }, { status: 400 });
++  }
++
++  try {
++    const body = RequestSchema.safeParse(payload);
++    if (!body.success) {
++      return NextResponse.json({ code: "INVALID_URL", message: "Informe uma URL válida do YouTube." }, { status: 400 });
++    }
++
++    return NextResponse.json(await extractSubtitles(body.data.url, body.data.language));
++  } catch (error) {
++    if (isAppError(error)) {
++      return NextResponse.json({ code: error.code, message: error.message }, { status: statusForCode(error.code) });
++    }
++    return NextResponse.json({ code: "SUBTITLE_EXTRACTION_FAILED", message: "Não foi possível extrair as legendas do vídeo." }, { status: 500 });
++  }
++}
+diff --git a/src/components/foundation/import-video-card.tsx b/src/components/foundation/import-video-card.tsx
+index 2c1c221..21326a5 100644
+--- a/src/components/foundation/import-video-card.tsx
++++ b/src/components/foundation/import-video-card.tsx
+@@ -4,13 +4,19 @@
+ import { useState, type FormEvent } from "react";
+ import { useRouter } from "next/navigation";
+ import { ArrowRight, ExternalLink, Info, Link2, LoaderCircle, Sparkles, X } from "lucide-react";
+-import type { VideoMetadata } from "@/types";
++import type { Transcript, VideoMetadata } from "@/types";
+ import { Button } from "@/components/ui/button";
+ import { Input } from "@/components/ui/input";
+ import { useProjectStore } from "@/stores/project-store";
+ 
+ type ApiError = { message?: string };
+ 
++type SubtitlesResponse = {
++  videoId: string;
++  selected: { language: string; kind: "manual" | "auto" } | null;
++  transcript: Pick<Transcript, "language" | "segments" | "fullText"> | null;
++};
++
+ function formatDuration(seconds: number): string {
+   const hours = Math.floor(seconds / 3_600);
+   const minutes = Math.floor((seconds % 3_600) / 60);
+@@ -18,6 +24,29 @@ function formatDuration(seconds: number): string {
+   return [hours, minutes, remaining].filter((value, index) => index > 0 || value > 0).map((value) => String(value).padStart(2, "0")).join(":");
+ }
+ 
++async function fetchExistingSubtitles(videoUrl: string, videoId: string): Promise<Transcript | undefined> {
++  try {
++    const response = await fetch("/api/youtube/subtitles", {
++      method: "POST",
++      headers: { "Content-Type": "application/json" },
++      body: JSON.stringify({ url: videoUrl }),
++    });
++    if (!response.ok) return undefined;
++    const body = await response.json() as SubtitlesResponse;
++    if (!body.transcript) return undefined;
++    return {
++      id: crypto.randomUUID(),
++      videoId,
++      language: body.transcript.language,
++      segments: body.transcript.segments,
++      fullText: body.transcript.fullText,
++      createdAt: new Date().toISOString(),
++    };
++  } catch {
++    return undefined;
++  }
++}
++
+ export function ImportVideoCard() {
+   const router = useRouter();
+   const addProject = useProjectStore((state) => state.addProject);
+@@ -25,39 +54,130 @@ export function ImportVideoCard() {
+   const [metadata, setMetadata] = useState<VideoMetadata | null>(null);
+   const [error, setError] = useState<string | null>(null);
+   const [isLoading, setIsLoading] = useState(false);
++  const [isCreating, setIsCreating] = useState(false);
+ 
+   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
+     event.preventDefault();
+-    setError(null); setMetadata(null); setIsLoading(true);
++    setError(null);
++    setMetadata(null);
++    setIsLoading(true);
+     try {
+-      const response = await fetch("/api/youtube/metadata", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ url }) });
++      const response = await fetch("/api/youtube/metadata", {
++        method: "POST",
++        headers: { "Content-Type": "application/json" },
++        body: JSON.stringify({ url }),
++      });
+       const body = await response.json() as VideoMetadata | ApiError;
+       if (!response.ok) throw new Error("message" in body ? body.message : "Não foi possível carregar o vídeo.");
+       setMetadata(body as VideoMetadata);
+     } catch (requestError) {
+       setError(requestError instanceof Error ? requestError.message : "Não foi possível carregar o vídeo.");
+-    } finally { setIsLoading(false); }
++    } finally {
++      setIsLoading(false);
++    }
+   }
+ 
+-  function createProject() {
+-    if (!metadata) return;
+-    const timestamp = new Date().toISOString();
+-    const id = crypto.randomUUID();
+-    addProject({ id, metadata, conversations: [], createdAt: timestamp, updatedAt: timestamp });
+-    router.push(`/video/${id}`);
++  async function createProject() {
++    if (!metadata || isCreating) return;
++    setIsCreating(true);
++    setError(null);
++    try {
++      const timestamp = new Date().toISOString();
++      const id = crypto.randomUUID();
++      const transcript = await fetchExistingSubtitles(metadata.url, metadata.videoId);
++      addProject({
++        id,
++        metadata,
++        transcript,
++        conversations: [],
++        createdAt: timestamp,
++        updatedAt: timestamp,
++      });
++      router.push(`/video/${id}`);
++    } catch (requestError) {
++      setError(requestError instanceof Error ? requestError.message : "Não foi possível criar o projeto.");
++      setIsCreating(false);
++    }
+   }
+ 
+-  return <section className="relative overflow-hidden rounded-2xl border border-zinc-200 bg-white p-6 shadow-sm sm:p-10 dark:border-zinc-800 dark:bg-zinc-900">
+-    <div className="pointer-events-none absolute -right-20 -top-24 size-64 rounded-full bg-violet-200/50 blur-3xl dark:bg-violet-950/30" />
+-    <div className="relative mx-auto max-w-2xl">
+-      <div className="mb-6 flex size-11 items-center justify-center rounded-xl bg-violet-100 text-violet-700 dark:bg-violet-950/50 dark:text-violet-300"><Sparkles className="size-5" /></div>
+-      <p className="text-sm font-medium text-violet-700 dark:text-violet-300">Transcreva. Pesquise. Entenda.</p>
+-      <h1 className="mt-2 text-balance text-3xl font-semibold tracking-tight sm:text-4xl">Transforme vídeos do YouTube em conhecimento pesquisável.</h1>
+-      <p className="mt-4 max-w-xl text-pretty leading-7 text-zinc-600 dark:text-zinc-400">Cole o link de um vídeo para verificar suas informações antes de criar uma transcrição.</p>
+-      <form className="mt-8" onSubmit={handleSubmit}><label className="sr-only" htmlFor="youtube-url">URL do vídeo do YouTube</label><div className="flex flex-col gap-3 sm:flex-row"><div className="flex h-12 flex-1 items-center gap-3 rounded-xl border border-zinc-300 bg-zinc-50 px-4 shadow-inner shadow-zinc-100 focus-within:border-violet-500 focus-within:ring-4 focus-within:ring-violet-500/10 dark:border-zinc-700 dark:bg-zinc-950 dark:shadow-none"><Link2 className="size-4 shrink-0 text-zinc-400" /><Input id="youtube-url" required value={url} onChange={(event) => setUrl(event.target.value)} type="url" placeholder="Cole uma URL do YouTube" className="h-auto min-w-0 flex-1 border-0 bg-transparent px-0 shadow-none focus-visible:border-0 focus-visible:ring-0" /></div><Button type="submit" size="lg" className="h-12 rounded-xl px-5" disabled={isLoading}>{isLoading ? <><LoaderCircle className="size-4 animate-spin" />Carregando</> : <>Importar vídeo <ArrowRight className="size-4" /></>}</Button></div></form>
+-      {error && <p className="mt-4 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700 dark:border-red-950 dark:bg-red-950/30 dark:text-red-300" role="alert">{error}</p>}
+-      {metadata && <div className="mt-6 overflow-hidden rounded-xl border border-zinc-200 bg-zinc-50 dark:border-zinc-800 dark:bg-zinc-950"><div className="flex flex-col gap-4 p-4 sm:flex-row">{metadata.thumbnail && <img src={metadata.thumbnail} alt="Miniatura do vídeo" className="aspect-video w-full rounded-lg object-cover sm:w-44" />}<div className="min-w-0 flex-1"><p className="text-xs font-medium uppercase tracking-wide text-zinc-500">Vídeo encontrado</p><h2 className="mt-1 truncate font-semibold">{metadata.title}</h2><p className="mt-1 text-sm text-zinc-600 dark:text-zinc-400">{metadata.channel ?? "Canal não informado"} · {formatDuration(metadata.duration)}</p><a className="mt-3 inline-flex items-center gap-1 text-xs text-violet-700 hover:underline dark:text-violet-300" href={metadata.url} target="_blank" rel="noreferrer">Abrir no YouTube <ExternalLink className="size-3" /></a></div></div><div className="flex justify-end gap-2 border-t border-zinc-200 p-3 dark:border-zinc-800"><Button type="button" variant="ghost" onClick={() => setMetadata(null)}><X className="size-4" />Cancelar</Button><Button type="button" onClick={createProject}>Criar projeto <ArrowRight className="size-4" /></Button></div></div>}
+-      <div className="mt-5 flex items-start gap-2 text-xs leading-5 text-zinc-500 dark:text-zinc-400"><Info className="mt-0.5 size-3.5 shrink-0" /><p>Somente URLs públicas, não listadas e válidas do YouTube são aceitas nesta etapa. A transcrição será habilitada nas próximas fases.</p></div>
+-    </div>
+-  </section>;
++  return (
++    <section className="relative overflow-hidden rounded-2xl border border-zinc-200 bg-white p-6 shadow-sm sm:p-10 dark:border-zinc-800 dark:bg-zinc-900">
++      <div className="pointer-events-none absolute -right-20 -top-24 size-64 rounded-full bg-violet-200/50 blur-3xl dark:bg-violet-950/30" />
++      <div className="relative mx-auto max-w-2xl">
++        <div className="mb-6 flex size-11 items-center justify-center rounded-xl bg-violet-100 text-violet-700 dark:bg-violet-950/50 dark:text-violet-300">
++          <Sparkles className="size-5" />
++        </div>
++        <p className="text-sm font-medium text-violet-700 dark:text-violet-300">Transcreva. Pesquise. Entenda.</p>
++        <h1 className="mt-2 text-balance text-3xl font-semibold tracking-tight sm:text-4xl">
++          Transforme vídeos do YouTube em conhecimento pesquisável.
++        </h1>
++        <p className="mt-4 max-w-xl text-pretty leading-7 text-zinc-600 dark:text-zinc-400">
++          Cole o link de um vídeo para verificar suas informações antes de criar uma transcrição.
++        </p>
++        <form className="mt-8" onSubmit={handleSubmit}>
++          <label className="sr-only" htmlFor="youtube-url">URL do vídeo do YouTube</label>
++          <div className="flex flex-col gap-3 sm:flex-row">
++            <div className="flex h-12 flex-1 items-center gap-3 rounded-xl border border-zinc-300 bg-zinc-50 px-4 shadow-inner shadow-zinc-100 focus-within:border-violet-500 focus-within:ring-4 focus-within:ring-violet-500/10 dark:border-zinc-700 dark:bg-zinc-950 dark:shadow-none">
++              <Link2 className="size-4 shrink-0 text-zinc-400" />
++              <Input
++                id="youtube-url"
++                required
++                value={url}
++                onChange={(event) => setUrl(event.target.value)}
++                type="url"
++                placeholder="Cole uma URL do YouTube"
++                className="h-auto min-w-0 flex-1 border-0 bg-transparent px-0 shadow-none focus-visible:border-0 focus-visible:ring-0"
++              />
++            </div>
++            <Button type="submit" size="lg" className="h-12 rounded-xl px-5" disabled={isLoading || isCreating}>
++              {isLoading ? <><LoaderCircle className="size-4 animate-spin" />Carregando</> : <>Importar vídeo <ArrowRight className="size-4" /></>}
++            </Button>
++          </div>
++        </form>
++        {error && (
++          <p className="mt-4 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700 dark:border-red-950 dark:bg-red-950/30 dark:text-red-300" role="alert">
++            {error}
++          </p>
++        )}
++        {metadata && (
++          <div className="mt-6 overflow-hidden rounded-xl border border-zinc-200 bg-zinc-50 dark:border-zinc-800 dark:bg-zinc-950">
++            <div className="flex flex-col gap-4 p-4 sm:flex-row">
++              {metadata.thumbnail && (
++                <img src={metadata.thumbnail} alt="Miniatura do vídeo" className="aspect-video w-full rounded-lg object-cover sm:w-44" />
++              )}
++              <div className="min-w-0 flex-1">
++                <p className="text-xs font-medium uppercase tracking-wide text-zinc-500">Vídeo encontrado</p>
++                <h2 className="mt-1 truncate font-semibold">{metadata.title}</h2>
++                <p className="mt-1 text-sm text-zinc-600 dark:text-zinc-400">
++                  {metadata.channel ?? "Canal não informado"} · {formatDuration(metadata.duration)}
++                </p>
++                <a
++                  className="mt-3 inline-flex items-center gap-1 text-xs text-violet-700 hover:underline dark:text-violet-300"
++                  href={metadata.url}
++                  target="_blank"
++                  rel="noreferrer"
++                >
++                  Abrir no YouTube <ExternalLink className="size-3" />
++                </a>
++              </div>
++            </div>
++            <div className="flex justify-end gap-2 border-t border-zinc-200 p-3 dark:border-zinc-800">
++              <Button type="button" variant="ghost" disabled={isCreating} onClick={() => setMetadata(null)}>
++                <X className="size-4" />Cancelar
++              </Button>
++              <Button type="button" disabled={isCreating} onClick={() => void createProject()}>
++                {isCreating ? <><LoaderCircle className="size-4 animate-spin" />Buscando legendas</> : <>Criar projeto <ArrowRight className="size-4" /></>}
++              </Button>
++            </div>
++          </div>
++        )}
++        <div className="mt-5 flex items-start gap-2 text-xs leading-5 text-zinc-500 dark:text-zinc-400">
++          <Info className="mt-0.5 size-3.5 shrink-0" />
++          <p>
++            Ao criar o projeto, legendas manuais ou automáticas existentes são preferidas antes da transcrição por áudio nas próximas fases.
++          </p>
++        </div>
++      </div>
++    </section>
++  );
+ }
+diff --git a/src/lib/utils/errors.ts b/src/lib/utils/errors.ts
+index 1bc6396..144d2ad 100644
+--- a/src/lib/utils/errors.ts
++++ b/src/lib/utils/errors.ts
+@@ -6,7 +6,9 @@ export type ApiErrorCode =
+   | "YTDLP_UNAVAILABLE"
+   | "PROCESS_UNAVAILABLE"
+   | "METADATA_EXTRACTION_FAILED"
+-  | "PROCESS_TIMEOUT";
++  | "PROCESS_TIMEOUT"
++  | "SUBTITLES_NOT_FOUND"
++  | "SUBTITLE_EXTRACTION_FAILED";
+ 
+ export class AppError extends Error {
+   constructor(
+diff --git a/src/lib/youtube/normalize-segments.test.ts b/src/lib/youtube/normalize-segments.test.ts
+new file mode 100644
+index 0000000..30c4f47
+--- /dev/null
++++ b/src/lib/youtube/normalize-segments.test.ts
+@@ -0,0 +1,33 @@
++import { describe, expect, it } from "vitest";
++import { buildFullText, normalizeSubtitleSegments } from "./normalize-segments";
++
++describe("normalizeSubtitleSegments", () => {
++  it("assigns ids and drops empty text", () => {
++    expect(normalizeSubtitleSegments([
++      { start: 1, end: 2, text: "  Hello  " },
++      { start: 2, end: 3, text: "   " },
++      { start: 3, end: 4, text: "world" },
++    ])).toEqual([
++      { id: "caption-1", start: 1, end: 2, text: "Hello" },
++      { id: "caption-2", start: 3, end: 4, text: "world" },
++    ]);
++  });
++
++  it("merges identical consecutive cues and rolling caption growth", () => {
++    expect(normalizeSubtitleSegments([
++      { start: 0, end: 2, text: "Hello" },
++      { start: 1, end: 3, text: "Hello" },
++      { start: 2, end: 4, text: "Hello world" },
++      { start: 3, end: 5, text: "world" },
++    ])).toEqual([
++      { id: "caption-1", start: 0, end: 5, text: "Hello world" },
++    ]);
++  });
++
++  it("builds searchable full text", () => {
++    expect(buildFullText([
++      { id: "caption-1", start: 0, end: 1, text: "Hello" },
++      { id: "caption-2", start: 1, end: 2, text: "world" },
++    ])).toBe("Hello world");
++  });
++});
+diff --git a/src/lib/youtube/normalize-segments.ts b/src/lib/youtube/normalize-segments.ts
+new file mode 100644
+index 0000000..ea77277
+--- /dev/null
++++ b/src/lib/youtube/normalize-segments.ts
+@@ -0,0 +1,68 @@
++import type { TranscriptSegment } from "@/types";
++import type { SubtitleSegment } from "./subtitle-types";
++
++function collapseWhitespace(text: string): string {
++  return text.replace(/\s+/g, " ").trim();
++}
++
++/**
++ * Normalizes raw subtitle cues into transcript segments.
++ * Deduplicates consecutive identical text and collapses overlapping
++ * rolling captions common in automatic YouTube VTT files.
++ */
++export function normalizeSubtitleSegments(segments: readonly SubtitleSegment[]): TranscriptSegment[] {
++  const cleaned = segments
++    .map((segment) => ({
++      start: segment.start,
++      end: segment.end,
++      text: collapseWhitespace(segment.text),
++    }))
++    .filter((segment) => segment.text.length > 0 && Number.isFinite(segment.start) && Number.isFinite(segment.end) && segment.end >= segment.start)
++    .sort((left, right) => left.start - right.start || left.end - right.end);
++
++  const merged: Array<{ start: number; end: number; text: string }> = [];
++
++  for (const segment of cleaned) {
++    const previous = merged.at(-1);
++    if (!previous) {
++      merged.push({ ...segment });
++      continue;
++    }
++
++    if (previous.text === segment.text) {
++      previous.end = Math.max(previous.end, segment.end);
++      continue;
++    }
++
++    if (
++      segment.start <= previous.end
++      && segment.text.startsWith(previous.text)
++      && segment.text.length > previous.text.length
++    ) {
++      previous.text = segment.text;
++      previous.end = Math.max(previous.end, segment.end);
++      continue;
++    }
++
++    if (
++      segment.start <= previous.end
++      && previous.text.endsWith(segment.text)
++    ) {
++      previous.end = Math.max(previous.end, segment.end);
++      continue;
++    }
++
++    merged.push({ ...segment });
++  }
++
++  return merged.map((segment, index) => ({
++    id: `caption-${index + 1}`,
++    start: segment.start,
++    end: segment.end,
++    text: segment.text,
++  }));
++}
++
++export function buildFullText(segments: readonly TranscriptSegment[]): string {
++  return segments.map((segment) => segment.text).join(" ").replace(/\s+/g, " ").trim();
++}
+diff --git a/src/lib/youtube/subtitle-types.ts b/src/lib/youtube/subtitle-types.ts
+new file mode 100644
+index 0000000..825f347
+--- /dev/null
++++ b/src/lib/youtube/subtitle-types.ts
+@@ -0,0 +1,18 @@
++export type SubtitleKind = "manual" | "auto";
++
++export type SubtitleTrack = {
++  language: string;
++  name?: string;
++  kind: SubtitleKind;
++};
++
++export type SelectedSubtitle = {
++  language: string;
++  kind: SubtitleKind;
++};
++
++export type SubtitleSegment = {
++  start: number;
++  end: number;
++  text: string;
++};
+diff --git a/src/lib/youtube/subtitles.test.ts b/src/lib/youtube/subtitles.test.ts
+new file mode 100644
+index 0000000..95ed095
+--- /dev/null
++++ b/src/lib/youtube/subtitles.test.ts
+@@ -0,0 +1,65 @@
++import { describe, expect, it } from "vitest";
++import {
++  listSubtitleTracks,
++  segmentsToTranscriptPayload,
++  selectSubtitleTrack,
++} from "./subtitles";
++import { normalizeSubtitleSegments } from "./normalize-segments";
++
++describe("listSubtitleTracks", () => {
++  it("prefers manual tracks and ranks Portuguese and English first", () => {
++    const result = listSubtitleTracks({
++      id: "dQw4w9WgXcQ",
++      subtitles: {
++        fr: [{ ext: "vtt", name: "French" }],
++        pt: [{ ext: "vtt", name: "Portuguese" }],
++      },
++      automatic_captions: {
++        en: [{ ext: "vtt" }],
++        es: [{ ext: "vtt" }],
++      },
++    });
++
++    expect(result.videoId).toBe("dQw4w9WgXcQ");
++    expect(result.available.map((track) => `${track.kind}:${track.language}`)).toEqual([
++      "manual:pt",
++      "manual:fr",
++      "auto:en",
++      "auto:es",
++    ]);
++  });
++});
++
++describe("selectSubtitleTrack", () => {
++  const available = listSubtitleTracks({
++    id: "abc",
++    subtitles: { en: [{ ext: "vtt" }] },
++    automatic_captions: { "pt-BR": [{ ext: "vtt" }], en: [{ ext: "vtt" }] },
++  }).available;
++
++  it("chooses manual tracks before automatic captions", () => {
++    expect(selectSubtitleTrack(available)).toEqual({ language: "en", kind: "manual" });
++  });
++
++  it("honors a preferred language including prefix matches", () => {
++    expect(selectSubtitleTrack(available, "pt")).toEqual({ language: "pt-BR", kind: "auto" });
++  });
++
++  it("returns null when nothing is available", () => {
++    expect(selectSubtitleTrack([])).toBeNull();
++  });
++});
++
++describe("segmentsToTranscriptPayload", () => {
++  it("builds the transcript DTO used by the API", () => {
++    const segments = normalizeSubtitleSegments([
++      { start: 0, end: 1, text: "Hello" },
++      { start: 1, end: 2, text: "world" },
++    ]);
++    expect(segmentsToTranscriptPayload(segments, "en")).toEqual({
++      language: "en",
++      segments,
++      fullText: "Hello world",
++    });
++  });
++});
+diff --git a/src/lib/youtube/subtitles.ts b/src/lib/youtube/subtitles.ts
+new file mode 100644
+index 0000000..05a55fa
+--- /dev/null
++++ b/src/lib/youtube/subtitles.ts
+@@ -0,0 +1,225 @@
++import { readdir, readFile } from "node:fs/promises";
++import { join } from "node:path";
++import { z } from "zod";
++import type { Transcript, TranscriptSegment } from "@/types";
++import { AppError } from "@/lib/utils/errors";
++import { buildFullText, normalizeSubtitleSegments } from "./normalize-segments";
++import { runProcess } from "./process";
++import type { SelectedSubtitle, SubtitleKind, SubtitleTrack } from "./subtitle-types";
++import { createJobDirectory, removeJobDirectory } from "./temp";
++import { YouTubeUrlSchema } from "./url";
++import { parseVtt } from "./vtt";
++
++const PREFERRED_LANGUAGES = ["pt", "pt-BR", "pt-PT", "en", "en-US", "en-GB"] as const;
++
++const YtDlpSubtitleEntrySchema = z.object({
++  ext: z.string().optional(),
++  name: z.string().optional(),
++}).passthrough();
++
++const YtDlpSubtitleCatalogSchema = z.object({
++  id: z.string().min(1),
++  subtitles: z.record(z.string(), z.array(YtDlpSubtitleEntrySchema)).optional().default({}),
++  automatic_captions: z.record(z.string(), z.array(YtDlpSubtitleEntrySchema)).optional().default({}),
++});
++
++export type SubtitlesResult = {
++  videoId: string;
++  available: SubtitleTrack[];
++  selected: SelectedSubtitle | null;
++  transcript: Pick<Transcript, "language" | "segments" | "fullText"> | null;
++};
++
++function mapSubtitleFailure(error: AppError): AppError {
++  if (error.code === "YTDLP_UNAVAILABLE" || error.code === "PROCESS_UNAVAILABLE" || error.code === "INVALID_URL" || error.code === "PROCESS_TIMEOUT") {
++    return error;
++  }
++  if (!error.details) {
++    return new AppError("SUBTITLE_EXTRACTION_FAILED", error.message, error.details);
++  }
++  const details = error.details.toLowerCase();
++  if (details.includes("private video") || details.includes("members-only")) {
++    return new AppError("VIDEO_PRIVATE", "Este vídeo é privado ou exige acesso autorizado.");
++  }
++  if (details.includes("sign in") || details.includes("authentication")) {
++    return new AppError("AUTH_REQUIRED", "O YouTube exige autenticação para acessar este vídeo.");
++  }
++  if (details.includes("video unavailable") || details.includes("not available")) {
++    return new AppError("VIDEO_NOT_FOUND", "O vídeo não está disponível.");
++  }
++  return new AppError("SUBTITLE_EXTRACTION_FAILED", "Não foi possível extrair as legendas do vídeo.", error.details);
++}
++
++function languageScore(language: string): number {
++  const index = PREFERRED_LANGUAGES.findIndex((preferred) => preferred.toLowerCase() === language.toLowerCase());
++  return index === -1 ? PREFERRED_LANGUAGES.length + 1 : index;
++}
++
++function tracksFromCatalog(
++  catalog: Record<string, Array<{ name?: string }>>,
++  kind: SubtitleKind,
++): SubtitleTrack[] {
++  return Object.entries(catalog)
++    .filter(([, formats]) => formats.length > 0)
++    .map(([language, formats]) => ({
++      language,
++      name: formats.find((format) => format.name)?.name,
++      kind,
++    }));
++}
++
++export function listSubtitleTracks(payload: unknown): { videoId: string; available: SubtitleTrack[] } {
++  const parsed = YtDlpSubtitleCatalogSchema.safeParse(payload);
++  if (!parsed.success) {
++    throw new AppError("SUBTITLE_EXTRACTION_FAILED", "Os dados de legendas retornados são inválidos.");
++  }
++
++  const manual = tracksFromCatalog(parsed.data.subtitles, "manual");
++  const automatic = tracksFromCatalog(parsed.data.automatic_captions, "auto");
++  const available = [...manual, ...automatic].sort((left, right) => {
++    if (left.kind !== right.kind) return left.kind === "manual" ? -1 : 1;
++    return languageScore(left.language) - languageScore(right.language) || left.language.localeCompare(right.language);
++  });
++
++  return { videoId: parsed.data.id, available };
++}
++
++export function selectSubtitleTrack(
++  available: readonly SubtitleTrack[],
++  preferredLanguage?: string,
++): SelectedSubtitle | null {
++  if (available.length === 0) return null;
++
++  if (preferredLanguage) {
++    const preferred = preferredLanguage.toLowerCase();
++    const exactManual = available.find((track) => track.kind === "manual" && track.language.toLowerCase() === preferred);
++    if (exactManual) return { language: exactManual.language, kind: exactManual.kind };
++    const prefixManual = available.find((track) => track.kind === "manual" && track.language.toLowerCase().startsWith(preferred));
++    if (prefixManual) return { language: prefixManual.language, kind: prefixManual.kind };
++    const exactAuto = available.find((track) => track.kind === "auto" && track.language.toLowerCase() === preferred);
++    if (exactAuto) return { language: exactAuto.language, kind: exactAuto.kind };
++    const prefixAuto = available.find((track) => track.kind === "auto" && track.language.toLowerCase().startsWith(preferred));
++    if (prefixAuto) return { language: prefixAuto.language, kind: prefixAuto.kind };
++  }
++
++  const firstManual = available.find((track) => track.kind === "manual");
++  if (firstManual) return { language: firstManual.language, kind: firstManual.kind };
++  const firstAuto = available.find((track) => track.kind === "auto");
++  return firstAuto ? { language: firstAuto.language, kind: firstAuto.kind } : null;
++}
++
++export function segmentsToTranscriptPayload(
++  segments: readonly TranscriptSegment[],
++  language: string,
++): Pick<Transcript, "language" | "segments" | "fullText"> {
++  return {
++    language,
++    segments: [...segments],
++    fullText: buildFullText(segments),
++  };
++}
++
++async function readDownloadedVtt(jobDirectory: string): Promise<string> {
++  const entries = await readdir(jobDirectory);
++  const vttFile = entries.find((entry) => entry.toLowerCase().endsWith(".vtt"));
++  if (!vttFile) {
++    throw new AppError("SUBTITLES_NOT_FOUND", "Nenhuma legenda utilizável foi encontrada para este vídeo.");
++  }
++  return readFile(join(jobDirectory, vttFile), "utf8");
++}
++
++async function downloadSubtitleFile(
++  url: string,
++  selected: SelectedSubtitle,
++  jobDirectory: string,
++): Promise<string> {
++  const writeFlag = selected.kind === "manual" ? "--write-subs" : "--write-auto-subs";
++  try {
++    await runProcess(
++      "yt-dlp",
++      [
++        "--skip-download",
++        "--no-playlist",
++        writeFlag,
++        "--sub-langs", selected.language,
++        "--sub-format", "vtt",
++        "--convert-subs", "vtt",
++        "-o", "subtitle.%(ext)s",
++        "--paths", jobDirectory,
++        url,
++      ],
++      { unavailableCode: "YTDLP_UNAVAILABLE", timeoutMs: 120_000 },
++    );
++  } catch (error) {
++    if (error instanceof AppError) throw mapSubtitleFailure(error);
++    throw error;
++  }
++  return readDownloadedVtt(jobDirectory);
++}
++
++export async function detectSubtitleTracks(inputUrl: string): Promise<{ videoId: string; available: SubtitleTrack[] }> {
++  const urlResult = YouTubeUrlSchema.safeParse(inputUrl);
++  if (!urlResult.success) {
++    throw new AppError("INVALID_URL", "Informe uma URL válida de vídeo do YouTube.");
++  }
++
++  let result;
++  try {
++    result = await runProcess(
++      "yt-dlp",
++      ["--dump-single-json", "--skip-download", "--no-playlist", urlResult.data.url],
++      { unavailableCode: "YTDLP_UNAVAILABLE" },
++    );
++  } catch (error) {
++    if (error instanceof AppError) throw mapSubtitleFailure(error);
++    throw error;
++  }
++
++  try {
++    return listSubtitleTracks(JSON.parse(result.stdout));
++  } catch (error) {
++    if (error instanceof AppError) throw error;
++    throw new AppError("SUBTITLE_EXTRACTION_FAILED", "Não foi possível interpretar as legendas disponíveis.");
++  }
++}
++
++export async function extractSubtitles(
++  inputUrl: string,
++  preferredLanguage?: string,
++): Promise<SubtitlesResult> {
++  const urlResult = YouTubeUrlSchema.safeParse(inputUrl);
++  if (!urlResult.success) {
++    throw new AppError("INVALID_URL", "Informe uma URL válida de vídeo do YouTube.");
++  }
++
++  const detected = await detectSubtitleTracks(urlResult.data.url);
++  const selected = selectSubtitleTrack(detected.available, preferredLanguage);
++  if (!selected) {
++    return {
++      videoId: detected.videoId,
++      available: detected.available,
++      selected: null,
++      transcript: null,
++    };
++  }
++
++  const jobDirectory = await createJobDirectory();
++  try {
++    const vtt = await downloadSubtitleFile(urlResult.data.url, selected, jobDirectory);
++    const segments = normalizeSubtitleSegments(parseVtt(vtt));
++    if (segments.length === 0) {
++      throw new AppError("SUBTITLES_NOT_FOUND", "Nenhuma legenda utilizável foi encontrada para este vídeo.");
++    }
++    return {
++      videoId: detected.videoId,
++      available: detected.available,
++      selected,
++      transcript: segmentsToTranscriptPayload(segments, selected.language),
++    };
++  } catch (error) {
++    if (error instanceof AppError) throw error;
++    throw new AppError("SUBTITLE_EXTRACTION_FAILED", "Não foi possível extrair as legendas do vídeo.");
++  } finally {
++    await removeJobDirectory(jobDirectory);
++  }
++}
+diff --git a/src/lib/youtube/vtt.test.ts b/src/lib/youtube/vtt.test.ts
+new file mode 100644
+index 0000000..a0a7406
+--- /dev/null
++++ b/src/lib/youtube/vtt.test.ts
+@@ -0,0 +1,39 @@
++import { describe, expect, it } from "vitest";
++import { parseVtt } from "./vtt";
++
++const SAMPLE = `WEBVTT
++
++1
++00:00:01.000 --> 00:00:03.500
++Hello <b>world</b>
++
++00:00:04.000 --> 00:00:06.000 align:start position:0%
++Second
++line
++
++NOTE this is ignored
++
++01:02:03.400 --> 01:02:05.500
++Hourly cue
++`;
++
++describe("parseVtt", () => {
++  it("extracts timed text and strips markup", () => {
++    expect(parseVtt(SAMPLE)).toEqual([
++      { start: 1, end: 3.5, text: "Hello world" },
++      { start: 4, end: 6, text: "Second line" },
++      { start: 3723.4, end: 3725.5, text: "Hourly cue" },
++    ]);
++  });
++
++  it("ignores invalid or empty cues", () => {
++    expect(parseVtt(`WEBVTT
++
++00:00:02.000 --> 00:00:01.000
++Backwards
++
++00:00:03.000 --> 00:00:04.000
++
++`)).toEqual([]);
++  });
++});
+diff --git a/src/lib/youtube/vtt.ts b/src/lib/youtube/vtt.ts
+new file mode 100644
+index 0000000..0c3c49b
+--- /dev/null
++++ b/src/lib/youtube/vtt.ts
+@@ -0,0 +1,54 @@
++import type { SubtitleSegment } from "./subtitle-types";
++
++const TIMESTAMP_PATTERN =
++  /^(?:(\d{2,}):)?(\d{2}):(\d{2})\.(\d{3})\s*-->\s*(?:(\d{2,}):)?(\d{2}):(\d{2})\.(\d{3})(?:\s+.*)?$/;
++
++function parseClock(
++  hours: string | undefined,
++  minutes: string,
++  seconds: string,
++  millis: string,
++): number {
++  const totalHours = hours ? Number(hours) : 0;
++  return totalHours * 3_600 + Number(minutes) * 60 + Number(seconds) + Number(millis) / 1_000;
++}
++
++function stripMarkup(text: string): string {
++  return text
++    .replace(/<[^>]+>/g, "")
++    .replace(/&nbsp;/gi, " ")
++    .replace(/&amp;/gi, "&")
++    .replace(/&lt;/gi, "<")
++    .replace(/&gt;/gi, ">")
++    .replace(/&quot;/gi, "\"")
++    .replace(/&#39;/gi, "'")
++    .replace(/\s+/g, " ")
++    .trim();
++}
++
++/** Parses WebVTT content into timed text segments without generating IDs. */
++export function parseVtt(content: string): SubtitleSegment[] {
++  const normalized = content.replace(/^\uFEFF/, "").replace(/\r\n?/g, "\n");
++  const blocks = normalized.split(/\n\n+/);
++  const segments: SubtitleSegment[] = [];
++
++  for (const block of blocks) {
++    const lines = block.split("\n").map((line) => line.trimEnd()).filter((line, index, all) => !(index === 0 && line === "" && all.length > 1));
++    if (lines.length === 0) continue;
++
++    const timeLineIndex = lines.findIndex((line) => TIMESTAMP_PATTERN.test(line.trim()));
++    if (timeLineIndex === -1) continue;
++
++    const timeMatch = lines[timeLineIndex]!.trim().match(TIMESTAMP_PATTERN);
++    if (!timeMatch) continue;
++
++    const start = parseClock(timeMatch[1], timeMatch[2]!, timeMatch[3]!, timeMatch[4]!);
++    const end = parseClock(timeMatch[5], timeMatch[6]!, timeMatch[7]!, timeMatch[8]!);
++    const text = stripMarkup(lines.slice(timeLineIndex + 1).join(" "));
++    if (!text || !Number.isFinite(start) || !Number.isFinite(end) || end < start) continue;
++
++    segments.push({ start, end, text });
++  }
++
++  return segments;
++}
