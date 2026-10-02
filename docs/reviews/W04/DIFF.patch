@@ -1,0 +1,1478 @@
+diff --git a/README.md b/README.md
+index 3fb7220..32e006e 100644
+--- a/README.md
++++ b/README.md
+@@ -9,7 +9,7 @@ npm install
+ npm run dev
+ ```
+ 
+-Para carregar metadata, legendas e, nas próximas fases, processar áudio, instale `yt-dlp` e `ffmpeg` no `PATH` da máquina que executa o Next.js. A aplicação não baixa nem persiste arquivos de vídeo ou áudio permanentemente. Legendas existentes do YouTube são preferidas antes da transcrição por áudio.
++Para carregar metadata, legendas e transcrever áudio, instale `yt-dlp` e `ffmpeg`/`ffprobe` no `PATH` da máquina que executa o Next.js. Configure a chave do provedor de transcrição (Groq ou OpenAI) em Configurações. A aplicação não persiste áudio no servidor; legendas existentes do YouTube são preferidas antes da transcrição por áudio.
+ 
+ ```powershell
+ npm test
+diff --git a/docs/STATUS.md b/docs/STATUS.md
+index 3061607..ad625b7 100644
+--- a/docs/STATUS.md
++++ b/docs/STATUS.md
+@@ -1,7 +1,7 @@
+ # Status do projeto
+ 
+-- Wave: W03 — Captions (Fase 3)
+-- State: complete
++- Wave: W04 — Transcription (Fase 4)
++- State: in_progress
+ - Last completed: W03 — Captions (Fase 3)
+ - Next action: W04 — implementar extração de áudio, chunking e adapters de transcrição.
+ - Last review: docs/reviews/W03/REVIEW.md
+diff --git a/src/app/api/transcription/start/route.ts b/src/app/api/transcription/start/route.ts
+new file mode 100644
+index 0000000..3c9b237
+--- /dev/null
++++ b/src/app/api/transcription/start/route.ts
+@@ -0,0 +1,88 @@
++import { z } from "zod";
++import { isAppError } from "@/lib/utils/errors";
++import { runTranscriptionPipeline } from "@/lib/transcription/pipeline";
++import type { TranscriptionProgressEvent } from "@/lib/transcription/types";
++import { TranscriptionProviderIdSchema } from "@/types";
++
++export const runtime = "nodejs";
++export const maxDuration = 300;
++
++const LanguageSchema = z.string().trim().regex(
++  /^[A-Za-z]{2,3}(?:-[A-Za-z0-9]{2,8})?$/,
++  "Informe um código de idioma válido.",
++);
++
++const RequestSchema = z.object({
++  url: z.string().trim().min(1).max(2_048),
++  provider: TranscriptionProviderIdSchema,
++  apiKey: z.string().trim().min(1).max(512),
++  model: z.string().trim().min(1).max(128),
++  language: LanguageSchema.optional(),
++});
++
++function encodeEvent(event: TranscriptionProgressEvent): string {
++  return `${JSON.stringify(event)}\n`;
++}
++
++export async function POST(request: Request) {
++  let payload: unknown;
++  try {
++    payload = await request.json();
++  } catch {
++    return Response.json({ code: "INVALID_URL", message: "Envie um corpo JSON válido." }, { status: 400 });
++  }
++
++  const body = RequestSchema.safeParse(payload);
++  if (!body.success) {
++    const hasLanguageError = body.error.issues.some((issue) => issue.path[0] === "language");
++    const hasProviderError = body.error.issues.some((issue) =>
++      issue.path[0] === "provider" || issue.path[0] === "model" || issue.path[0] === "apiKey");
++    if (hasLanguageError) {
++      return Response.json({ code: "INVALID_LANGUAGE", message: "Informe um código de idioma válido." }, { status: 400 });
++    }
++    if (hasProviderError) {
++      return Response.json({ code: "INVALID_PROVIDER", message: "Informe provedor, modelo e chave de API válidos." }, { status: 400 });
++    }
++    return Response.json({ code: "INVALID_URL", message: "Informe uma URL válida do YouTube." }, { status: 400 });
++  }
++
++  const stream = new ReadableStream<Uint8Array>({
++    start(controller) {
++      const encoder = new TextEncoder();
++      const send = (event: TranscriptionProgressEvent) => {
++        controller.enqueue(encoder.encode(encodeEvent(event)));
++      };
++
++      void (async () => {
++        try {
++          const transcript = await runTranscriptionPipeline({
++            url: body.data.url,
++            provider: body.data.provider,
++            apiKey: body.data.apiKey,
++            model: body.data.model,
++            language: body.data.language,
++            onProgress: (event) => send(event),
++          });
++          send({ type: "complete", transcript });
++          controller.close();
++        } catch (error) {
++          if (isAppError(error)) {
++            send({ type: "error", code: error.code, message: error.message });
++            controller.close();
++            return;
++          }
++          send({ type: "error", code: "TRANSCRIPTION_FAILED", message: "Não foi possível concluir a transcrição." });
++          controller.close();
++        }
++      })();
++    },
++  });
++
++  return new Response(stream, {
++    status: 200,
++    headers: {
++      "Content-Type": "application/x-ndjson; charset=utf-8",
++      "Cache-Control": "no-store",
++    },
++  });
++}
+diff --git a/src/app/settings/page.tsx b/src/app/settings/page.tsx
+index 9890898..8d60ac0 100644
+--- a/src/app/settings/page.tsx
++++ b/src/app/settings/page.tsx
+@@ -1,9 +1,85 @@
+-import { Bot, KeyRound, Monitor, ShieldCheck, Video } from "lucide-react";
++import { TranscriptionSettingsForm } from "@/components/settings/transcription-settings-form";
+ import { PhaseNotice } from "@/components/foundation/phase-notice";
+ import { AppShell } from "@/components/layout/app-shell";
+-
+-const sections = [{ icon: Bot, title: "Provedor de IA", detail: "Configure o provedor e modelo para o chat." }, { icon: KeyRound, title: "Transcrição", detail: "Escolha o provedor de speech-to-text." }, { icon: Video, title: "Acesso ao YouTube", detail: "Use cookies.txt apenas para vídeos aos quais você tem acesso." }, { icon: Monitor, title: "Aparência", detail: "Escolha entre tema claro, escuro ou do sistema." }];
++import { Bot, KeyRound, Monitor, ShieldCheck, Video } from "lucide-react";
+ 
+ export default function SettingsPage() {
+-  return <AppShell><div className="mx-auto max-w-3xl"><p className="text-sm font-medium text-violet-700 dark:text-violet-300">Preferências locais</p><h1 className="mt-1 text-3xl font-semibold tracking-tight">Configurações</h1><p className="mt-2 text-zinc-600 dark:text-zinc-400">Controle como o aplicativo processa e utiliza seus vídeos.</p><div className="mt-8 overflow-hidden rounded-2xl border border-zinc-200 bg-white shadow-sm dark:border-zinc-800 dark:bg-zinc-900">{sections.map(({ icon: Icon, title, detail }) => <section className="flex gap-4 border-b border-zinc-100 p-5 last:border-b-0 dark:border-zinc-800" key={title}><span className="grid size-9 shrink-0 place-items-center rounded-lg bg-zinc-100 text-zinc-600 dark:bg-zinc-800 dark:text-zinc-300"><Icon className="size-4" /></span><div><h2 className="font-medium">{title}</h2><p className="mt-1 text-sm leading-6 text-zinc-600 dark:text-zinc-400">{detail}</p><span className="mt-2 inline-block text-xs font-medium text-zinc-400">Em breve</span></div></section>)}</div><div className="mt-6"><PhaseNotice><span className="inline-flex items-center gap-2"><ShieldCheck className="size-4" />Quando habilitadas, as chaves serão armazenadas apenas neste navegador e nunca serão registradas em logs.</span></PhaseNotice></div></div></AppShell>;
++  return (
++    <AppShell>
++      <div className="mx-auto max-w-3xl">
++        <p className="text-sm font-medium text-violet-700 dark:text-violet-300">Preferências locais</p>
++        <h1 className="mt-1 text-3xl font-semibold tracking-tight">Configurações</h1>
++        <p className="mt-2 text-zinc-600 dark:text-zinc-400">
++          Controle como o aplicativo processa e utiliza seus vídeos.
++        </p>
++
++        <div className="mt-8 overflow-hidden rounded-2xl border border-zinc-200 bg-white shadow-sm dark:border-zinc-800 dark:bg-zinc-900">
++          <section className="border-b border-zinc-100 p-5 dark:border-zinc-800">
++            <div className="flex gap-4">
++              <span className="grid size-9 shrink-0 place-items-center rounded-lg bg-zinc-100 text-zinc-600 dark:bg-zinc-800 dark:text-zinc-300">
++                <KeyRound className="size-4" />
++              </span>
++              <div className="min-w-0 flex-1">
++                <h2 className="font-medium">Transcrição</h2>
++                <p className="mt-1 text-sm leading-6 text-zinc-600 dark:text-zinc-400">
++                  Escolha o provedor de speech-to-text e informe a chave de API usada apenas neste navegador.
++                </p>
++                <div className="mt-4">
++                  <TranscriptionSettingsForm />
++                </div>
++              </div>
++            </div>
++          </section>
++
++          <section className="flex gap-4 border-b border-zinc-100 p-5 dark:border-zinc-800">
++            <span className="grid size-9 shrink-0 place-items-center rounded-lg bg-zinc-100 text-zinc-600 dark:bg-zinc-800 dark:text-zinc-300">
++              <Bot className="size-4" />
++            </span>
++            <div>
++              <h2 className="font-medium">Provedor de IA</h2>
++              <p className="mt-1 text-sm leading-6 text-zinc-600 dark:text-zinc-400">
++                Configure o provedor e modelo para o chat.
++              </p>
++              <span className="mt-2 inline-block text-xs font-medium text-zinc-400">Em breve</span>
++            </div>
++          </section>
++
++          <section className="flex gap-4 border-b border-zinc-100 p-5 dark:border-zinc-800">
++            <span className="grid size-9 shrink-0 place-items-center rounded-lg bg-zinc-100 text-zinc-600 dark:bg-zinc-800 dark:text-zinc-300">
++              <Video className="size-4" />
++            </span>
++            <div>
++              <h2 className="font-medium">Acesso ao YouTube</h2>
++              <p className="mt-1 text-sm leading-6 text-zinc-600 dark:text-zinc-400">
++                Use cookies.txt apenas para vídeos aos quais você tem acesso.
++              </p>
++              <span className="mt-2 inline-block text-xs font-medium text-zinc-400">Em breve</span>
++            </div>
++          </section>
++
++          <section className="flex gap-4 p-5">
++            <span className="grid size-9 shrink-0 place-items-center rounded-lg bg-zinc-100 text-zinc-600 dark:bg-zinc-800 dark:text-zinc-300">
++              <Monitor className="size-4" />
++            </span>
++            <div>
++              <h2 className="font-medium">Aparência</h2>
++              <p className="mt-1 text-sm leading-6 text-zinc-600 dark:text-zinc-400">
++                Escolha entre tema claro, escuro ou do sistema.
++              </p>
++              <span className="mt-2 inline-block text-xs font-medium text-zinc-400">Em breve</span>
++            </div>
++          </section>
++        </div>
++
++        <div className="mt-6">
++          <PhaseNotice>
++            <span className="inline-flex items-center gap-2">
++              <ShieldCheck className="size-4" />
++              As chaves de transcrição ficam apenas neste navegador e não devem ser registradas em logs do servidor.
++            </span>
++          </PhaseNotice>
++        </div>
++      </div>
++    </AppShell>
++  );
+ }
+diff --git a/src/app/video/[id]/page.tsx b/src/app/video/[id]/page.tsx
+index 48de6cc..43e4354 100644
+--- a/src/app/video/[id]/page.tsx
++++ b/src/app/video/[id]/page.tsx
+@@ -1,9 +1,6 @@
+-import Link from "next/link";
+-import { ArrowLeft, MessageSquareText, Search, Subtitles, Video } from "lucide-react";
+-import { PhaseNotice } from "@/components/foundation/phase-notice";
+-import { AppShell } from "@/components/layout/app-shell";
++import { VideoWorkspace } from "@/components/transcription/video-workspace";
+ 
+ export default async function VideoWorkspacePage({ params }: PageProps<"/video/[id]">) {
+   const { id } = await params;
+-  return <AppShell compact><div className="mb-6"><Link href="/library" className="inline-flex items-center gap-2 text-sm text-zinc-600 hover:text-zinc-950 dark:text-zinc-400 dark:hover:text-white"><ArrowLeft className="size-4" />Biblioteca</Link><div className="mt-4 flex flex-wrap items-end justify-between gap-3"><div><p className="text-xs font-medium uppercase tracking-wider text-zinc-500">Espaço de trabalho</p><h1 className="mt-1 text-2xl font-semibold tracking-tight">Vídeo em preparação</h1><p className="mt-1 text-sm text-zinc-500">Projeto {id}</p></div><span className="rounded-full bg-amber-100 px-3 py-1 text-xs font-medium text-amber-800 dark:bg-amber-950/50 dark:text-amber-300">Aguardando importação</span></div></div><div className="grid gap-6 lg:grid-cols-[minmax(0,1.85fr)_minmax(20rem,1fr)]"><section className="overflow-hidden rounded-2xl border border-zinc-200 bg-white shadow-sm dark:border-zinc-800 dark:bg-zinc-900"><div className="grid aspect-video place-items-center bg-zinc-950 text-center text-zinc-400"><div><Video className="mx-auto size-8 text-zinc-600" /><p className="mt-3 text-sm">O player será exibido após a importação.</p></div></div><div className="p-5"><div className="flex items-center justify-between"><h2 className="font-semibold">Transcrição</h2><Search className="size-4 text-zinc-400" /></div><div className="mt-4 rounded-xl border border-dashed border-zinc-300 p-5 text-sm leading-6 text-zinc-500 dark:border-zinc-700">Os segmentos com timestamps e a busca serão habilitados nas próximas fases.</div></div></section><aside className="rounded-2xl border border-zinc-200 bg-white p-5 shadow-sm dark:border-zinc-800 dark:bg-zinc-900"><div className="flex items-center gap-2"><MessageSquareText className="size-4 text-violet-600 dark:text-violet-400" /><h2 className="font-semibold">Assistente de IA</h2></div><div className="mt-5 flex min-h-72 flex-col items-center justify-center text-center"><span className="grid size-10 place-items-center rounded-xl bg-zinc-100 text-zinc-500 dark:bg-zinc-800"><Subtitles className="size-5" /></span><p className="mt-4 text-sm font-medium">Pergunte qualquer coisa sobre este vídeo.</p><p className="mt-2 text-sm leading-6 text-zinc-500">O chat será liberado assim que houver uma transcrição e um provedor configurado.</p></div><div className="rounded-xl border border-zinc-200 bg-zinc-50 px-3 py-3 text-sm text-zinc-400 dark:border-zinc-800 dark:bg-zinc-950">Faça uma pergunta sobre o vídeo...</div></aside></div><div className="mt-6"><PhaseNotice>Este é o espaço de trabalho da Fase 5. Player, transcrição, busca e chat ainda não processam dados reais.</PhaseNotice></div></AppShell>;
++  return <VideoWorkspace projectId={id} />;
+ }
+diff --git a/src/components/settings/transcription-settings-form.tsx b/src/components/settings/transcription-settings-form.tsx
+new file mode 100644
+index 0000000..93cdc5f
+--- /dev/null
++++ b/src/components/settings/transcription-settings-form.tsx
+@@ -0,0 +1,98 @@
++"use client";
++
++import { useState, type FormEvent } from "react";
++import type { TranscriptionProviderId } from "@/types";
++import { Button } from "@/components/ui/button";
++import { Input } from "@/components/ui/input";
++import { useSettingsStore } from "@/stores/settings-store";
++
++const PROVIDERS: Array<{ id: TranscriptionProviderId; label: string; models: string[] }> = [
++  { id: "groq", label: "Groq", models: ["whisper-large-v3-turbo", "whisper-large-v3"] },
++  { id: "openai", label: "OpenAI", models: ["whisper-1", "gpt-4o-mini-transcribe", "gpt-4o-transcribe"] },
++];
++
++export function TranscriptionSettingsForm() {
++  const settings = useSettingsStore((state) => state.settings);
++  const updateSettings = useSettingsStore((state) => state.updateSettings);
++  const hasHydrated = useSettingsStore((state) => state.hasHydrated);
++  const [saved, setSaved] = useState(false);
++
++  const current = settings.transcriptionProvider;
++  const providerMeta = PROVIDERS.find((item) => item.id === current.provider) ?? PROVIDERS[0]!;
++
++  function handleSubmit(event: FormEvent<HTMLFormElement>) {
++    event.preventDefault();
++    const form = new FormData(event.currentTarget);
++    const provider = String(form.get("provider") ?? "groq") as TranscriptionProviderId;
++    const model = String(form.get("model") ?? "").trim();
++    const apiKey = String(form.get("apiKey") ?? "");
++    updateSettings({
++      transcriptionProvider: { provider, model, apiKey },
++    });
++    setSaved(true);
++    window.setTimeout(() => setSaved(false), 2_000);
++  }
++
++  if (!hasHydrated) {
++    return <p className="text-sm text-zinc-500">Carregando preferências locais...</p>;
++  }
++
++  return (
++    <form className="space-y-4" onSubmit={handleSubmit}>
++      <div className="grid gap-4 sm:grid-cols-2">
++        <label className="grid gap-1.5 text-sm">
++          <span className="font-medium">Provedor</span>
++          <select
++            name="provider"
++            defaultValue={current.provider}
++            className="h-10 rounded-lg border border-zinc-300 bg-white px-3 dark:border-zinc-700 dark:bg-zinc-950"
++            onChange={(event) => {
++              const provider = event.target.value as TranscriptionProviderId;
++              const models = PROVIDERS.find((item) => item.id === provider)?.models ?? [];
++              updateSettings({
++                transcriptionProvider: {
++                  provider,
++                  apiKey: current.apiKey,
++                  model: models[0] ?? current.model,
++                },
++              });
++            }}
++          >
++            {PROVIDERS.map((provider) => (
++              <option key={provider.id} value={provider.id}>{provider.label}</option>
++            ))}
++          </select>
++        </label>
++        <label className="grid gap-1.5 text-sm">
++          <span className="font-medium">Modelo</span>
++          <select
++            name="model"
++            value={current.model}
++            onChange={(event) => updateSettings({
++              transcriptionProvider: { ...current, model: event.target.value },
++            })}
++            className="h-10 rounded-lg border border-zinc-300 bg-white px-3 dark:border-zinc-700 dark:bg-zinc-950"
++          >
++            {providerMeta.models.map((model) => (
++              <option key={model} value={model}>{model}</option>
++            ))}
++          </select>
++        </label>
++      </div>
++      <label className="grid gap-1.5 text-sm">
++        <span className="font-medium">Chave de API</span>
++        <Input
++          name="apiKey"
++          type="password"
++          autoComplete="off"
++          defaultValue={current.apiKey}
++          placeholder="Armazenada apenas neste navegador"
++        />
++      </label>
++      <div className="flex items-center gap-3">
++        <Button type="submit">Salvar transcrição</Button>
++        {saved && <p className="text-sm text-emerald-700 dark:text-emerald-300">Preferências salvas localmente.</p>}
++      </div>
++    </form>
++  );
++}
+diff --git a/src/components/transcription/video-workspace.tsx b/src/components/transcription/video-workspace.tsx
+new file mode 100644
+index 0000000..d9b121a
+--- /dev/null
++++ b/src/components/transcription/video-workspace.tsx
+@@ -0,0 +1,249 @@
++"use client";
++
++import Link from "next/link";
++import { useEffect, useMemo, useState } from "react";
++import { useRouter } from "next/navigation";
++import {
++  ArrowLeft,
++  LoaderCircle,
++  MessageSquareText,
++  Search,
++  Subtitles,
++  Video,
++  WandSparkles,
++} from "lucide-react";
++import type { Transcript, VideoProject } from "@/types";
++import type { TranscriptionProgressEvent } from "@/lib/transcription/types";
++import { PhaseNotice } from "@/components/foundation/phase-notice";
++import { AppShell } from "@/components/layout/app-shell";
++import { Button } from "@/components/ui/button";
++import { useProjectStore } from "@/stores/project-store";
++import { useSettingsStore } from "@/stores/settings-store";
++
++function formatTimestamp(seconds: number): string {
++  const total = Math.max(0, Math.floor(seconds));
++  const hours = Math.floor(total / 3_600);
++  const minutes = Math.floor((total % 3_600) / 60);
++  const remaining = total % 60;
++  if (hours > 0) {
++    return `${hours}:${String(minutes).padStart(2, "0")}:${String(remaining).padStart(2, "0")}`;
++  }
++  return `${minutes}:${String(remaining).padStart(2, "0")}`;
++}
++
++async function consumeTranscriptionStream(
++  response: Response,
++  onEvent: (event: TranscriptionProgressEvent) => void,
++): Promise<Extract<TranscriptionProgressEvent, { type: "complete" }>["transcript"]> {
++  if (!response.body) throw new Error("Resposta de transcrição sem corpo.");
++  const reader = response.body.getReader();
++  const decoder = new TextDecoder();
++  let buffer = "";
++  let complete: Extract<TranscriptionProgressEvent, { type: "complete" }>["transcript"] | null = null;
++
++  while (true) {
++    const { done, value } = await reader.read();
++    if (done) break;
++    buffer += decoder.decode(value, { stream: true });
++    const lines = buffer.split("\n");
++    buffer = lines.pop() ?? "";
++    for (const line of lines) {
++      if (!line.trim()) continue;
++      const event = JSON.parse(line) as TranscriptionProgressEvent;
++      onEvent(event);
++      if (event.type === "complete") complete = event.transcript;
++      if (event.type === "error") throw new Error(event.message);
++    }
++  }
++
++  if (!complete) throw new Error("A transcrição terminou sem resultado.");
++  return complete;
++}
++
++export function VideoWorkspace({ projectId }: { projectId: string }) {
++  const router = useRouter();
++  const hasHydratedProjects = useProjectStore((state) => state.hasHydrated);
++  const hydrateProjects = useProjectStore((state) => state.hydrate);
++  const projects = useProjectStore((state) => state.projects);
++  const setTranscript = useProjectStore((state) => state.setTranscript);
++
++  const hasHydratedSettings = useSettingsStore((state) => state.hasHydrated);
++  const hydrateSettings = useSettingsStore((state) => state.hydrate);
++  const transcriptionProvider = useSettingsStore((state) => state.settings.transcriptionProvider);
++
++  const [progress, setProgress] = useState<string | null>(null);
++  const [error, setError] = useState<string | null>(null);
++  const [isTranscribing, setIsTranscribing] = useState(false);
++
++  useEffect(() => {
++    if (!hasHydratedProjects) hydrateProjects();
++    if (!hasHydratedSettings) hydrateSettings();
++  }, [hasHydratedProjects, hasHydratedSettings, hydrateProjects, hydrateSettings]);
++
++  const project = useMemo(
++    () => projects.find((item) => item.id === projectId) as VideoProject | undefined,
++    [projectId, projects],
++  );
++
++  async function startTranscription() {
++    if (!project || isTranscribing) return;
++    if (!transcriptionProvider.apiKey.trim()) {
++      setError("Configure a chave de API de transcrição em Configurações.");
++      return;
++    }
++
++    setIsTranscribing(true);
++    setError(null);
++    setProgress("Preparando transcrição...");
++
++    try {
++      const response = await fetch("/api/transcription/start", {
++        method: "POST",
++        headers: { "Content-Type": "application/json" },
++        body: JSON.stringify({
++          url: project.metadata.url,
++          provider: transcriptionProvider.provider,
++          apiKey: transcriptionProvider.apiKey,
++          model: transcriptionProvider.model,
++        }),
++      });
++
++      if (!response.ok) {
++        const body = await response.json() as { message?: string };
++        throw new Error(body.message ?? "Não foi possível iniciar a transcrição.");
++      }
++
++      const completePayload = await consumeTranscriptionStream(response, (event) => {
++        if (event.type === "status") setProgress(event.message ?? event.status);
++      });
++
++      const transcript: Transcript = {
++        id: crypto.randomUUID(),
++        videoId: project.metadata.videoId,
++        language: completePayload.language,
++        segments: completePayload.segments,
++        fullText: completePayload.fullText,
++        createdAt: new Date().toISOString(),
++      };
++      setTranscript(project.id, transcript);
++      setProgress("Transcrição concluída.");
++    } catch (requestError) {
++      setError(requestError instanceof Error ? requestError.message : "Não foi possível transcrever o vídeo.");
++      setProgress(null);
++    } finally {
++      setIsTranscribing(false);
++    }
++  }
++
++  if (!hasHydratedProjects || !hasHydratedSettings) {
++    return (
++      <AppShell compact>
++        <p className="text-sm text-zinc-500">Carregando projeto local...</p>
++      </AppShell>
++    );
++  }
++
++  if (!project) {
++    return (
++      <AppShell compact>
++        <div className="mx-auto max-w-lg rounded-2xl border border-zinc-200 bg-white p-6 dark:border-zinc-800 dark:bg-zinc-900">
++          <h1 className="text-xl font-semibold">Projeto não encontrado</h1>
++          <p className="mt-2 text-sm text-zinc-600 dark:text-zinc-400">
++            Este projeto não existe neste navegador.
++          </p>
++          <Button className="mt-4" onClick={() => router.push("/")}>Voltar ao início</Button>
++        </div>
++      </AppShell>
++    );
++  }
++
++  return (
++    <AppShell compact>
++      <div className="mb-6">
++        <Link href="/library" className="inline-flex items-center gap-2 text-sm text-zinc-600 hover:text-zinc-950 dark:text-zinc-400 dark:hover:text-white">
++          <ArrowLeft className="size-4" />Biblioteca
++        </Link>
++        <div className="mt-4 flex flex-wrap items-end justify-between gap-3">
++          <div>
++            <p className="text-xs font-medium uppercase tracking-wider text-zinc-500">Espaço de trabalho</p>
++            <h1 className="mt-1 text-2xl font-semibold tracking-tight">{project.metadata.title}</h1>
++            <p className="mt-1 text-sm text-zinc-500">{project.metadata.channel ?? "Canal não informado"}</p>
++          </div>
++          <span className="rounded-full bg-violet-100 px-3 py-1 text-xs font-medium text-violet-800 dark:bg-violet-950/50 dark:text-violet-300">
++            {project.transcript ? "Transcrição disponível" : "Sem transcrição"}
++          </span>
++        </div>
++      </div>
++
++      <div className="grid gap-6 lg:grid-cols-[minmax(0,1.85fr)_minmax(20rem,1fr)]">
++        <section className="overflow-hidden rounded-2xl border border-zinc-200 bg-white shadow-sm dark:border-zinc-800 dark:bg-zinc-900">
++          <div className="grid aspect-video place-items-center bg-zinc-950 text-center text-zinc-400">
++            <div>
++              <Video className="mx-auto size-8 text-zinc-600" />
++              <p className="mt-3 text-sm">O player do YouTube chega na Fase 5.</p>
++            </div>
++          </div>
++          <div className="p-5">
++            <div className="flex flex-wrap items-center justify-between gap-3">
++              <div className="flex items-center gap-2">
++                <h2 className="font-semibold">Transcrição</h2>
++                <Search className="size-4 text-zinc-400" />
++              </div>
++              <Button type="button" size="sm" disabled={isTranscribing} onClick={() => void startTranscription()}>
++                {isTranscribing
++                  ? <><LoaderCircle className="size-4 animate-spin" />Transcrevendo</>
++                  : <><WandSparkles className="size-4" />{project.transcript ? "Nova transcrição IA" : "Transcrever com IA"}</>}
++              </Button>
++            </div>
++
++            {progress && (
++              <p className="mt-3 text-sm text-violet-700 dark:text-violet-300" aria-live="polite">{progress}</p>
++            )}
++            {error && (
++              <p className="mt-3 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700 dark:border-red-950 dark:bg-red-950/30 dark:text-red-300" role="alert">
++                {error}
++              </p>
++            )}
++
++            {project.transcript ? (
++              <div className="mt-4 max-h-[28rem] space-y-3 overflow-y-auto pr-1">
++                {project.transcript.segments.map((segment) => (
++                  <div key={segment.id} className="grid grid-cols-[4.5rem_minmax(0,1fr)] gap-3 text-sm">
++                    <span className="font-mono text-xs text-zinc-500">{formatTimestamp(segment.start)}</span>
++                    <p className="leading-6 text-zinc-700 dark:text-zinc-300">{segment.text}</p>
++                  </div>
++                ))}
++              </div>
++            ) : (
++              <div className="mt-4 rounded-xl border border-dashed border-zinc-300 p-5 text-sm leading-6 text-zinc-500 dark:border-zinc-700">
++                Nenhuma transcrição ainda. Se o vídeo tiver legendas, elas podem ter sido importadas na criação do projeto; caso contrário, use a transcrição por IA.
++              </div>
++            )}
++          </div>
++        </section>
++
++        <aside className="rounded-2xl border border-zinc-200 bg-white p-5 shadow-sm dark:border-zinc-800 dark:bg-zinc-900">
++          <div className="flex items-center gap-2">
++            <MessageSquareText className="size-4 text-violet-600 dark:text-violet-400" />
++            <h2 className="font-semibold">Assistente de IA</h2>
++          </div>
++          <div className="mt-5 flex min-h-72 flex-col items-center justify-center text-center">
++            <span className="grid size-10 place-items-center rounded-xl bg-zinc-100 text-zinc-500 dark:bg-zinc-800">
++              <Subtitles className="size-5" />
++            </span>
++            <p className="mt-4 text-sm font-medium">Pergunte qualquer coisa sobre este vídeo.</p>
++            <p className="mt-2 text-sm leading-6 text-zinc-500">
++              O chat será liberado na Fase 6, após a transcrição e um provedor de chat.
++            </p>
++          </div>
++        </aside>
++      </div>
++
++      <div className="mt-6">
++        <PhaseNotice>
++          Fase 4 habilita a pipeline de transcrição. Player, busca avançada e chat chegam nas próximas fases.
++        </PhaseNotice>
++      </div>
++    </AppShell>
++  );
++}
+diff --git a/src/lib/transcription/chunk-audio.test.ts b/src/lib/transcription/chunk-audio.test.ts
+new file mode 100644
+index 0000000..33f1c58
+--- /dev/null
++++ b/src/lib/transcription/chunk-audio.test.ts
+@@ -0,0 +1,24 @@
++import { describe, expect, it } from "vitest";
++import { planAudioChunks } from "./chunk-audio";
++
++describe("planAudioChunks", () => {
++  it("creates a single chunk for short audio", () => {
++    expect(planAudioChunks(120, 480)).toEqual([
++      { index: 0, startSeconds: 0, endSeconds: 120 },
++    ]);
++  });
++
++  it("splits long audio into contiguous chunks with offsets", () => {
++    expect(planAudioChunks(1_000, 480)).toEqual([
++      { index: 0, startSeconds: 0, endSeconds: 480 },
++      { index: 1, startSeconds: 480, endSeconds: 960 },
++      { index: 2, startSeconds: 960, endSeconds: 1_000 },
++    ]);
++  });
++
++  it("rejects invalid durations", () => {
++    expect(() => planAudioChunks(0)).toThrowError(
++      expect.objectContaining({ code: "AUDIO_EXTRACTION_FAILED" }),
++    );
++  });
++});
+diff --git a/src/lib/transcription/chunk-audio.ts b/src/lib/transcription/chunk-audio.ts
+new file mode 100644
+index 0000000..37c8df4
+--- /dev/null
++++ b/src/lib/transcription/chunk-audio.ts
+@@ -0,0 +1,74 @@
++import { mkdir } from "node:fs/promises";
++import { join } from "node:path";
++import { AppError } from "@/lib/utils/errors";
++import { runProcess } from "@/lib/youtube/process";
++import { DEFAULT_CHUNK_SECONDS, type AudioChunk } from "./types";
++
++export type AudioChunkPlan = {
++  index: number;
++  startSeconds: number;
++  endSeconds: number;
++};
++
++/** Pure planner used by tests and by the ffmpeg chunk writer. */
++export function planAudioChunks(
++  durationSeconds: number,
++  chunkSeconds: number = DEFAULT_CHUNK_SECONDS,
++): AudioChunkPlan[] {
++  if (!Number.isFinite(durationSeconds) || durationSeconds <= 0) {
++    throw new AppError("AUDIO_EXTRACTION_FAILED", "A duração do áudio é inválida para chunking.");
++  }
++  if (!Number.isFinite(chunkSeconds) || chunkSeconds <= 0) {
++    throw new AppError("AUDIO_EXTRACTION_FAILED", "O tamanho do chunk de áudio é inválido.");
++  }
++
++  const plans: AudioChunkPlan[] = [];
++  let start = 0;
++  let index = 0;
++  while (start < durationSeconds) {
++    const end = Math.min(durationSeconds, start + chunkSeconds);
++    plans.push({ index, startSeconds: start, endSeconds: end });
++    start = end;
++    index += 1;
++  }
++  return plans;
++}
++
++export async function chunkAudio(
++  inputPath: string,
++  outputDirectory: string,
++  durationSeconds: number,
++  chunkSeconds: number = DEFAULT_CHUNK_SECONDS,
++): Promise<AudioChunk[]> {
++  const plans = planAudioChunks(durationSeconds, chunkSeconds);
++  await mkdir(outputDirectory, { recursive: true });
++
++  const chunks: AudioChunk[] = [];
++  for (const plan of plans) {
++    const path = join(outputDirectory, `chunk-${String(plan.index).padStart(3, "0")}.mp3`);
++    const length = plan.endSeconds - plan.startSeconds;
++    await runProcess(
++      "ffmpeg",
++      [
++        "-y",
++        "-ss", String(plan.startSeconds),
++        "-t", String(length),
++        "-i", inputPath,
++        "-ac", "1",
++        "-ar", "16000",
++        "-vn",
++        "-codec:a", "libmp3lame",
++        "-b:a", "64k",
++        path,
++      ],
++      {
++        unavailableCode: "FFMPEG_UNAVAILABLE",
++        failureCode: "AUDIO_EXTRACTION_FAILED",
++        failureMessage: "Não foi possível dividir o áudio em partes.",
++        timeoutMs: 300_000,
++      },
++    );
++    chunks.push({ ...plan, path });
++  }
++  return chunks;
++}
+diff --git a/src/lib/transcription/merge-transcripts.test.ts b/src/lib/transcription/merge-transcripts.test.ts
+new file mode 100644
+index 0000000..49996a4
+--- /dev/null
++++ b/src/lib/transcription/merge-transcripts.test.ts
+@@ -0,0 +1,51 @@
++import { describe, expect, it } from "vitest";
++import { mergeTranscriptChunks } from "./merge-transcripts";
++
++describe("mergeTranscriptChunks", () => {
++  it("offsets timestamps and preserves ordered segments", () => {
++    const merged = mergeTranscriptChunks([
++      {
++        offsetSeconds: 0,
++        result: {
++          language: "en",
++          segments: [{ id: "a", start: 0, end: 2, text: "Hello" }],
++          fullText: "Hello",
++        },
++      },
++      {
++        offsetSeconds: 480,
++        result: {
++          language: "en",
++          segments: [{ id: "b", start: 1, end: 3, text: "world" }],
++          fullText: "world",
++        },
++      },
++    ]);
++
++    expect(merged).toEqual({
++      language: "en",
++      segments: [
++        { id: "transcript-1-1", start: 0, end: 2, text: "Hello" },
++        { id: "transcript-2-1", start: 481, end: 483, text: "world" },
++      ],
++      fullText: "Hello world",
++    });
++  });
++
++  it("drops empty segments", () => {
++    expect(mergeTranscriptChunks([
++      {
++        offsetSeconds: 0,
++        result: {
++          segments: [
++            { id: "a", start: 0, end: 1, text: "  " },
++            { id: "b", start: 1, end: 2, text: "Keep" },
++          ],
++          fullText: "Keep",
++        },
++      },
++    ]).segments).toEqual([
++      { id: "transcript-1-2", start: 1, end: 2, text: "Keep" },
++    ]);
++  });
++});
+diff --git a/src/lib/transcription/merge-transcripts.ts b/src/lib/transcription/merge-transcripts.ts
+new file mode 100644
+index 0000000..cdc14a6
+--- /dev/null
++++ b/src/lib/transcription/merge-transcripts.ts
+@@ -0,0 +1,41 @@
++import type { TranscriptSegment } from "@/types";
++import type { TranscriptionResult } from "./types";
++
++function shiftSegment(segment: TranscriptSegment, offsetSeconds: number, id: string): TranscriptSegment {
++  return {
++    id,
++    start: segment.start + offsetSeconds,
++    end: segment.end + offsetSeconds,
++    text: segment.text.trim(),
++  };
++}
++
++/** Merges per-chunk transcription results using each chunk's start offset. */
++export function mergeTranscriptChunks(
++  chunkResults: ReadonlyArray<{ offsetSeconds: number; result: TranscriptionResult }>,
++): TranscriptionResult {
++  const segments: TranscriptSegment[] = [];
++  let language: string | undefined;
++
++  chunkResults.forEach(({ offsetSeconds, result }, chunkIndex) => {
++    if (!language && result.language) language = result.language;
++    result.segments.forEach((segment, segmentIndex) => {
++      const shifted = shiftSegment(
++        segment,
++        offsetSeconds,
++        `transcript-${chunkIndex + 1}-${segmentIndex + 1}`,
++      );
++      if (!shifted.text) return;
++      if (!Number.isFinite(shifted.start) || !Number.isFinite(shifted.end) || shifted.end < shifted.start) return;
++      segments.push(shifted);
++    });
++  });
++
++  segments.sort((left, right) => left.start - right.start || left.end - right.end);
++
++  return {
++    language,
++    segments,
++    fullText: segments.map((segment) => segment.text).join(" ").replace(/\s+/g, " ").trim(),
++  };
++}
+diff --git a/src/lib/transcription/pipeline.ts b/src/lib/transcription/pipeline.ts
+new file mode 100644
+index 0000000..18b8f73
+--- /dev/null
++++ b/src/lib/transcription/pipeline.ts
+@@ -0,0 +1,119 @@
++import { mkdir } from "node:fs/promises";
++import { join } from "node:path";
++import { AppError, isAppError } from "@/lib/utils/errors";
++import type { TranscriptionProviderId } from "@/types";
++import { extractAudio } from "@/lib/youtube/downloader";
++import { normalizeAudio, probeAudioDurationSeconds } from "@/lib/youtube/ffmpeg";
++import { createJobDirectory, removeJobDirectory } from "@/lib/youtube/temp";
++import { chunkAudio } from "./chunk-audio";
++import { mergeTranscriptChunks } from "./merge-transcripts";
++import { getTranscriptionProvider } from "./providers";
++import {
++  DEFAULT_TRANSCRIPTION_CONCURRENCY,
++  type TranscriptionOptions,
++  type TranscriptionProgressEvent,
++  type TranscriptionProvider,
++  type TranscriptionResult,
++} from "./types";
++
++export type RunTranscriptionInput = {
++  url: string;
++  provider: TranscriptionProviderId;
++  apiKey: string;
++  model: string;
++  language?: string;
++  concurrency?: number;
++  onProgress?: (event: Extract<TranscriptionProgressEvent, { type: "status" }>) => void;
++};
++
++async function mapPool<T, R>(
++  items: readonly T[],
++  concurrency: number,
++  worker: (item: T, index: number) => Promise<R>,
++): Promise<R[]> {
++  const results = new Array<R>(items.length);
++  let nextIndex = 0;
++
++  async function runWorker(): Promise<void> {
++    while (nextIndex < items.length) {
++      const current = nextIndex;
++      nextIndex += 1;
++      results[current] = await worker(items[current]!, current);
++    }
++  }
++
++  const size = Math.max(1, Math.min(concurrency, items.length || 1));
++  await Promise.all(Array.from({ length: size }, () => runWorker()));
++  return results;
++}
++
++export async function runTranscriptionPipeline(input: RunTranscriptionInput): Promise<TranscriptionResult> {
++  if (!input.apiKey.trim()) {
++    throw new AppError("PROVIDER_AUTH_FAILED", "Informe a chave de API do provedor de transcrição.");
++  }
++  if (!input.model.trim()) {
++    throw new AppError("INVALID_PROVIDER", "Informe o modelo de transcrição.");
++  }
++
++  const provider: TranscriptionProvider = getTranscriptionProvider(input.provider);
++  const options: TranscriptionOptions = {
++    apiKey: input.apiKey,
++    model: input.model,
++    language: input.language,
++  };
++  const emit = input.onProgress;
++  const jobDirectory = await createJobDirectory();
++
++  try {
++    emit?.({ type: "status", status: "downloading_audio", message: "Baixando áudio do YouTube..." });
++    const sourcePath = await extractAudio(input.url, jobDirectory);
++
++    emit?.({ type: "status", status: "processing_audio", message: "Normalizando áudio..." });
++    const normalizedPath = join(jobDirectory, "audio.mp3");
++    await normalizeAudio(sourcePath, normalizedPath);
++    const durationSeconds = await probeAudioDurationSeconds(normalizedPath);
++
++    emit?.({ type: "status", status: "chunking_audio", message: "Dividindo áudio em partes..." });
++    const chunksDirectory = join(jobDirectory, "chunks");
++    await mkdir(chunksDirectory, { recursive: true });
++    const chunks = await chunkAudio(normalizedPath, chunksDirectory, durationSeconds);
++
++    emit?.({
++      type: "status",
++      status: "transcribing",
++      current: 0,
++      total: chunks.length,
++      message: `Transcrevendo 0/${chunks.length}...`,
++    });
++
++    let completed = 0;
++    const chunkResults = await mapPool(
++      chunks,
++      input.concurrency ?? DEFAULT_TRANSCRIPTION_CONCURRENCY,
++      async (chunk) => {
++        const result = await provider.transcribe(chunk.path, options);
++        completed += 1;
++        emit?.({
++          type: "status",
++          status: "transcribing",
++          current: completed,
++          total: chunks.length,
++          message: `Transcrevendo ${completed}/${chunks.length}...`,
++        });
++        return { offsetSeconds: chunk.startSeconds, result };
++      },
++    );
++
++    emit?.({ type: "status", status: "merging", message: "Unificando segmentos..." });
++    const merged = mergeTranscriptChunks(chunkResults);
++    if (merged.segments.length === 0) {
++      throw new AppError("TRANSCRIPTION_FAILED", "A transcrição não retornou segmentos utilizáveis.");
++    }
++    return merged;
++  } catch (error) {
++    if (isAppError(error)) throw error;
++    throw new AppError("TRANSCRIPTION_FAILED", "Não foi possível concluir a transcrição.");
++  } finally {
++    await removeJobDirectory(jobDirectory);
++  }
++}
+diff --git a/src/lib/transcription/providers/groq.ts b/src/lib/transcription/providers/groq.ts
+new file mode 100644
+index 0000000..f5cd511
+--- /dev/null
++++ b/src/lib/transcription/providers/groq.ts
+@@ -0,0 +1,11 @@
++import type { TranscriptionProvider } from "../types";
++import { transcribeWithOpenAiCompatibleApi } from "./http";
++
++const GROQ_TRANSCRIPTIONS_URL = "https://api.groq.com/openai/v1/audio/transcriptions";
++
++export const groqTranscriptionProvider: TranscriptionProvider = {
++  id: "groq",
++  transcribe(filePath, options) {
++    return transcribeWithOpenAiCompatibleApi(GROQ_TRANSCRIPTIONS_URL, filePath, options);
++  },
++};
+diff --git a/src/lib/transcription/providers/http.test.ts b/src/lib/transcription/providers/http.test.ts
+new file mode 100644
+index 0000000..9d9b893
+--- /dev/null
++++ b/src/lib/transcription/providers/http.test.ts
+@@ -0,0 +1,79 @@
++import { mkdtemp, rm, writeFile } from "node:fs/promises";
++import { tmpdir } from "node:os";
++import { join } from "node:path";
++import { afterEach, describe, expect, it, vi } from "vitest";
++import { transcribeWithOpenAiCompatibleApi } from "./http";
++
++describe("transcribeWithOpenAiCompatibleApi", () => {
++  const directories: string[] = [];
++
++  afterEach(async () => {
++    vi.restoreAllMocks();
++    await Promise.all(directories.splice(0).map((directory) => rm(directory, { recursive: true, force: true })));
++  });
++
++  async function createAudioFile(): Promise<string> {
++    const directory = await mkdtemp(join(tmpdir(), "youtube-ai-provider-"));
++    directories.push(directory);
++    const filePath = join(directory, "chunk.mp3");
++    await writeFile(filePath, Buffer.from("fake-audio"));
++    return filePath;
++  }
++
++  it("parses verbose_json segments from a successful provider response", async () => {
++    const filePath = await createAudioFile();
++    vi.spyOn(globalThis, "fetch").mockImplementation(async (_url, init) => {
++      const headers = new Headers(init?.headers);
++      expect(headers.get("Authorization")).toBe("Bearer sk-test");
++      expect(init?.body).toBeInstanceOf(FormData);
++      return new Response(JSON.stringify({
++        text: "Hello world",
++        language: "en",
++        segments: [
++          { start: 0, end: 1.5, text: "Hello" },
++          { start: 1.5, end: 3, text: "world" },
++        ],
++      }), { status: 200 });
++    });
++
++    await expect(
++      transcribeWithOpenAiCompatibleApi(
++        "https://api.groq.com/openai/v1/audio/transcriptions",
++        filePath,
++        { apiKey: "sk-test", model: "whisper-large-v3-turbo" },
++      ),
++    ).resolves.toEqual({
++      language: "en",
++      fullText: "Hello world",
++      segments: [
++        { id: "provider-1", start: 0, end: 1.5, text: "Hello" },
++        { id: "provider-2", start: 1.5, end: 3, text: "world" },
++      ],
++    });
++  });
++
++  it("maps unauthorized and rate-limited provider responses", async () => {
++    const filePath = await createAudioFile();
++    const fetchMock = vi.spyOn(globalThis, "fetch")
++      .mockResolvedValueOnce(new Response("unauthorized", { status: 401 }))
++      .mockResolvedValueOnce(new Response("rate limited", { status: 429 }));
++
++    await expect(
++      transcribeWithOpenAiCompatibleApi(
++        "https://api.openai.com/v1/audio/transcriptions",
++        filePath,
++        { apiKey: "sk-test", model: "whisper-1" },
++      ),
++    ).rejects.toMatchObject({ code: "PROVIDER_AUTH_FAILED" });
++
++    await expect(
++      transcribeWithOpenAiCompatibleApi(
++        "https://api.openai.com/v1/audio/transcriptions",
++        filePath,
++        { apiKey: "sk-test", model: "whisper-1" },
++      ),
++    ).rejects.toMatchObject({ code: "RATE_LIMITED" });
++
++    expect(fetchMock).toHaveBeenCalledTimes(2);
++  });
++});
+diff --git a/src/lib/transcription/providers/http.ts b/src/lib/transcription/providers/http.ts
+new file mode 100644
+index 0000000..61d3eb6
+--- /dev/null
++++ b/src/lib/transcription/providers/http.ts
+@@ -0,0 +1,96 @@
++import { readFile } from "node:fs/promises";
++import { basename } from "node:path";
++import { z } from "zod";
++import { AppError } from "@/lib/utils/errors";
++import type { TranscriptionOptions, TranscriptionResult } from "../types";
++
++const WhisperSegmentSchema = z.object({
++  start: z.number().finite().nonnegative(),
++  end: z.number().finite().nonnegative(),
++  text: z.string(),
++}).refine((segment) => segment.end >= segment.start, {
++  message: "O término do segmento deve ser posterior ao início.",
++  path: ["end"],
++});
++
++const WhisperVerboseSchema = z.object({
++  text: z.string().optional().default(""),
++  language: z.string().optional(),
++  segments: z.array(WhisperSegmentSchema).optional().default([]),
++});
++
++function mapProviderHttpError(status: number, bodyText: string): AppError {
++  if (status === 401 || status === 403) {
++    return new AppError("PROVIDER_AUTH_FAILED", "A chave de API do provedor de transcrição foi rejeitada.");
++  }
++  if (status === 429) {
++    return new AppError("RATE_LIMITED", "O provedor de transcrição atingiu o limite de requisições.");
++  }
++  return new AppError(
++    "TRANSCRIPTION_FAILED",
++    "Não foi possível transcrever o áudio com o provedor selecionado.",
++    bodyText.slice(0, 500),
++  );
++}
++
++export async function transcribeWithOpenAiCompatibleApi(
++  endpoint: string,
++  filePath: string,
++  options: TranscriptionOptions,
++): Promise<TranscriptionResult> {
++  const bytes = await readFile(filePath);
++  const form = new FormData();
++  form.append(
++    "file",
++    new Blob([Uint8Array.from(bytes)], { type: "audio/mpeg" }),
++    basename(filePath) || "chunk.mp3",
++  );
++  form.append("model", options.model);
++  form.append("response_format", "verbose_json");
++  form.append("timestamp_granularities[]", "segment");
++  if (options.language) form.append("language", options.language);
++
++  let response: Response;
++  try {
++    response = await fetch(endpoint, {
++      method: "POST",
++      headers: {
++        Authorization: `Bearer ${options.apiKey}`,
++      },
++      body: form,
++    });
++  } catch {
++    throw new AppError("TRANSCRIPTION_FAILED", "Não foi possível contatar o provedor de transcrição.");
++  }
++
++  const bodyText = await response.text();
++  if (!response.ok) {
++    throw mapProviderHttpError(response.status, bodyText);
++  }
++
++  let payload: unknown;
++  try {
++    payload = JSON.parse(bodyText);
++  } catch {
++    throw new AppError("TRANSCRIPTION_FAILED", "A resposta do provedor de transcrição é inválida.");
++  }
++
++  const parsed = WhisperVerboseSchema.safeParse(payload);
++  if (!parsed.success) {
++    throw new AppError("TRANSCRIPTION_FAILED", "A resposta do provedor de transcrição é inválida.");
++  }
++
++  const segments = parsed.data.segments.map((segment, index) => ({
++    id: `provider-${index + 1}`,
++    start: segment.start,
++    end: segment.end,
++    text: segment.text.trim(),
++  })).filter((segment) => segment.text.length > 0);
++
++  const fullText = parsed.data.text.trim() || segments.map((segment) => segment.text).join(" ").trim();
++  return {
++    language: parsed.data.language,
++    segments,
++    fullText,
++  };
++}
+diff --git a/src/lib/transcription/providers/index.ts b/src/lib/transcription/providers/index.ts
+new file mode 100644
+index 0000000..cb7c508
+--- /dev/null
++++ b/src/lib/transcription/providers/index.ts
+@@ -0,0 +1,18 @@
++import { AppError } from "@/lib/utils/errors";
++import type { TranscriptionProviderId } from "@/types";
++import type { TranscriptionProvider } from "../types";
++import { groqTranscriptionProvider } from "./groq";
++import { openAiTranscriptionProvider } from "./openai";
++
++const PROVIDERS: Record<TranscriptionProviderId, TranscriptionProvider> = {
++  openai: openAiTranscriptionProvider,
++  groq: groqTranscriptionProvider,
++};
++
++export function getTranscriptionProvider(provider: TranscriptionProviderId): TranscriptionProvider {
++  const selected = PROVIDERS[provider];
++  if (!selected) {
++    throw new AppError("INVALID_PROVIDER", "Informe um provedor de transcrição suportado.");
++  }
++  return selected;
++}
+diff --git a/src/lib/transcription/providers/openai.ts b/src/lib/transcription/providers/openai.ts
+new file mode 100644
+index 0000000..377f978
+--- /dev/null
++++ b/src/lib/transcription/providers/openai.ts
+@@ -0,0 +1,11 @@
++import type { TranscriptionProvider } from "../types";
++import { transcribeWithOpenAiCompatibleApi } from "./http";
++
++const OPENAI_TRANSCRIPTIONS_URL = "https://api.openai.com/v1/audio/transcriptions";
++
++export const openAiTranscriptionProvider: TranscriptionProvider = {
++  id: "openai",
++  transcribe(filePath, options) {
++    return transcribeWithOpenAiCompatibleApi(OPENAI_TRANSCRIPTIONS_URL, filePath, options);
++  },
++};
+diff --git a/src/lib/transcription/types.ts b/src/lib/transcription/types.ts
+new file mode 100644
+index 0000000..9437c62
+--- /dev/null
++++ b/src/lib/transcription/types.ts
+@@ -0,0 +1,61 @@
++import type { TranscriptSegment } from "@/types";
++import type { TranscriptionProviderId } from "@/types";
++
++export type TranscriptionStatus =
++  | "idle"
++  | "downloading_audio"
++  | "processing_audio"
++  | "chunking_audio"
++  | "transcribing"
++  | "merging"
++  | "complete"
++  | "error";
++
++export type AudioChunk = {
++  index: number;
++  startSeconds: number;
++  endSeconds: number;
++  path: string;
++};
++
++export type TranscriptionOptions = {
++  apiKey: string;
++  model: string;
++  language?: string;
++};
++
++export type TranscriptionResult = {
++  language?: string;
++  segments: TranscriptSegment[];
++  fullText: string;
++};
++
++export type TranscriptionProvider = {
++  id: TranscriptionProviderId;
++  transcribe(filePath: string, options: TranscriptionOptions): Promise<TranscriptionResult>;
++};
++
++export type TranscriptionProgressEvent =
++  | {
++      type: "status";
++      status: Exclude<TranscriptionStatus, "idle" | "complete" | "error">;
++      current?: number;
++      total?: number;
++      message?: string;
++    }
++  | {
++      type: "complete";
++      transcript: {
++        language?: string;
++        segments: TranscriptSegment[];
++        fullText: string;
++      };
++    }
++  | {
++      type: "error";
++      code: string;
++      message: string;
++    };
++
++export const DEFAULT_CHUNK_SECONDS = 480;
++export const DEFAULT_TRANSCRIPTION_CONCURRENCY = 2;
+diff --git a/src/lib/utils/errors.ts b/src/lib/utils/errors.ts
+index fea09c7..4ab0ef6 100644
+--- a/src/lib/utils/errors.ts
++++ b/src/lib/utils/errors.ts
+@@ -9,7 +9,13 @@ export type ApiErrorCode =
+   | "PROCESS_TIMEOUT"
+   | "SUBTITLES_NOT_FOUND"
+   | "SUBTITLE_EXTRACTION_FAILED"
+-  | "INVALID_LANGUAGE";
++  | "INVALID_LANGUAGE"
++  | "AUDIO_EXTRACTION_FAILED"
++  | "FFMPEG_UNAVAILABLE"
++  | "TRANSCRIPTION_FAILED"
++  | "PROVIDER_AUTH_FAILED"
++  | "RATE_LIMITED"
++  | "INVALID_PROVIDER";
+ 
+ export class AppError extends Error {
+   constructor(
+diff --git a/src/lib/youtube/downloader.ts b/src/lib/youtube/downloader.ts
+new file mode 100644
+index 0000000..db55f93
+--- /dev/null
++++ b/src/lib/youtube/downloader.ts
+@@ -0,0 +1,77 @@
++import { readdir } from "node:fs/promises";
++import { join } from "node:path";
++import { AppError } from "@/lib/utils/errors";
++import { runProcess } from "./process";
++import { YouTubeUrlSchema } from "./url";
++
++function mapAudioFailure(error: AppError): AppError {
++  if (
++    error.code === "YTDLP_UNAVAILABLE"
++    || error.code === "PROCESS_UNAVAILABLE"
++    || error.code === "INVALID_URL"
++    || error.code === "PROCESS_TIMEOUT"
++    || error.code === "FFMPEG_UNAVAILABLE"
++  ) {
++    return error;
++  }
++  if (!error.details) {
++    return new AppError("AUDIO_EXTRACTION_FAILED", "Não foi possível extrair o áudio do vídeo.", error.details);
++  }
++  const details = error.details.toLowerCase();
++  if (details.includes("private video") || details.includes("members-only")) {
++    return new AppError("VIDEO_PRIVATE", "Este vídeo é privado ou exige acesso autorizado.");
++  }
++  if (details.includes("sign in") || details.includes("authentication")) {
++    return new AppError("AUTH_REQUIRED", "O YouTube exige autenticação para acessar este vídeo.");
++  }
++  if (
++    details.includes("video unavailable")
++    || details.includes("video not available")
++    || details.includes("incomplete youtube id")
++  ) {
++    return new AppError("VIDEO_NOT_FOUND", "O vídeo não está disponível.");
++  }
++  return new AppError("AUDIO_EXTRACTION_FAILED", "Não foi possível extrair o áudio do vídeo.", error.details);
++}
++
++async function findDownloadedAudio(jobDirectory: string): Promise<string> {
++  const entries = await readdir(jobDirectory);
++  const audioFile = entries.find((entry) => /\.(mp3|m4a|webm|opus|ogg|wav|flac|aac)$/i.test(entry));
++  if (!audioFile) {
++    throw new AppError("AUDIO_EXTRACTION_FAILED", "Nenhum arquivo de áudio foi gerado para este vídeo.");
++  }
++  return join(jobDirectory, audioFile);
++}
++
++/** Downloads audio only into the job directory. Caller owns cleanup. */
++export async function extractAudio(inputUrl: string, jobDirectory: string): Promise<string> {
++  const urlResult = YouTubeUrlSchema.safeParse(inputUrl);
++  if (!urlResult.success) {
++    throw new AppError("INVALID_URL", "Informe uma URL válida de vídeo do YouTube.");
++  }
++
++  try {
++    await runProcess(
++      "yt-dlp",
++      [
++        "-f", "bestaudio/bestaudio*/best",
++        "--no-playlist",
++        "--no-warnings",
++        "-o", "source.%(ext)s",
++        "--paths", jobDirectory,
++        urlResult.data.url,
++      ],
++      {
++        unavailableCode: "YTDLP_UNAVAILABLE",
++        failureCode: "AUDIO_EXTRACTION_FAILED",
++        failureMessage: "Não foi possível extrair o áudio do vídeo.",
++        timeoutMs: 300_000,
++      },
++    );
++  } catch (error) {
++    if (error instanceof AppError) throw mapAudioFailure(error);
++    throw error;
++  }
++
++  return findDownloadedAudio(jobDirectory);
++}
+diff --git a/src/lib/youtube/ffmpeg.ts b/src/lib/youtube/ffmpeg.ts
+index b43f748..c6ad799 100644
+--- a/src/lib/youtube/ffmpeg.ts
++++ b/src/lib/youtube/ffmpeg.ts
+@@ -1,15 +1,50 @@
++import { access } from "node:fs/promises";
++import { AppError } from "@/lib/utils/errors";
+ import { runProcess } from "./process";
+ 
+ /** Internal wrapper for the Phase 4 audio workflow. Arguments are never browser-provided. */
+ export async function normalizeAudio(inputPath: string, outputPath: string): Promise<void> {
+-  await runProcess("ffmpeg", [
+-    "-y",
+-    "-i", inputPath,
+-    "-ac", "1",
+-    "-ar", "16000",
+-    "-vn",
+-    "-codec:a", "libmp3lame",
+-    "-b:a", "64k",
+-    outputPath,
+-  ]);
++  await runProcess(
++    "ffmpeg",
++    [
++      "-y",
++      "-i", inputPath,
++      "-ac", "1",
++      "-ar", "16000",
++      "-vn",
++      "-codec:a", "libmp3lame",
++      "-b:a", "64k",
++      outputPath,
++    ],
++    {
++      unavailableCode: "FFMPEG_UNAVAILABLE",
++      failureCode: "AUDIO_EXTRACTION_FAILED",
++      failureMessage: "Não foi possível normalizar o áudio do vídeo.",
++      timeoutMs: 300_000,
++    },
++  );
++}
++
++export async function probeAudioDurationSeconds(filePath: string): Promise<number> {
++  try {
++    await access(filePath);
++  } catch {
++    throw new AppError("AUDIO_EXTRACTION_FAILED", "Arquivo de áudio não encontrado para medição de duração.");
++  }
++
++  const result = await runProcess(
++    "ffprobe",
++    ["-v", "error", "-show_entries", "format=duration", "-of", "csv=p=0", filePath],
++    {
++      unavailableCode: "FFMPEG_UNAVAILABLE",
++      failureCode: "AUDIO_EXTRACTION_FAILED",
++      failureMessage: "Não foi possível determinar a duração do áudio.",
++    },
++  );
++
++  const duration = Number.parseFloat(result.stdout.trim());
++  if (!Number.isFinite(duration) || duration <= 0) {
++    throw new AppError("AUDIO_EXTRACTION_FAILED", "A duração do áudio retornada é inválida.");
++  }
++  return duration;
+ }
+diff --git a/src/lib/youtube/process.ts b/src/lib/youtube/process.ts
+index 4186ffe..b48faf4 100644
+--- a/src/lib/youtube/process.ts
++++ b/src/lib/youtube/process.ts
+@@ -1,5 +1,5 @@
+ import { spawn } from "node:child_process";
+-import { AppError } from "@/lib/utils/errors";
++import { AppError, type ApiErrorCode } from "@/lib/utils/errors";
+ 
+ export type ProcessResult = {
+   stdout: string;
+@@ -11,20 +11,31 @@ export type RunProcessOptions = {
+   timeoutMs?: number;
+   maxOutputBytes?: number;
+   cwd?: string;
+-  unavailableCode?: "YTDLP_UNAVAILABLE" | "PROCESS_UNAVAILABLE";
++  unavailableCode?: "YTDLP_UNAVAILABLE" | "PROCESS_UNAVAILABLE" | "FFMPEG_UNAVAILABLE";
++  failureCode?: ApiErrorCode;
++  failureMessage?: string;
+ };
+ 
+ const DEFAULT_TIMEOUT_MS = 60_000;
+ const DEFAULT_MAX_OUTPUT_BYTES = 5 * 1024 * 1024;
+ 
++function unavailableMessage(code: NonNullable<RunProcessOptions["unavailableCode"]>): string {
++  if (code === "YTDLP_UNAVAILABLE") return "yt-dlp não está instalado no servidor.";
++  if (code === "FFMPEG_UNAVAILABLE") return "ffmpeg não está instalado no servidor.";
++  return "Não foi possível executar o processamento.";
++}
++
+ /** Runs only application-defined commands. Never pass unvalidated input as an argument. */
+ export function runProcess(
+   command: string,
+   args: readonly string[],
+   options: RunProcessOptions = {},
+ ): Promise<ProcessResult> {
++  const failureCode = options.failureCode ?? "METADATA_EXTRACTION_FAILED";
++  const failureMessage = options.failureMessage ?? "Não foi possível obter os dados do vídeo.";
++
+   if (!command || args.some((arg) => arg.includes("\0"))) {
+-    return Promise.reject(new AppError("METADATA_EXTRACTION_FAILED", "Comando inválido."));
++    return Promise.reject(new AppError(failureCode, "Comando inválido."));
+   }
+ 
+   const timeoutMs = options.timeoutMs ?? DEFAULT_TIMEOUT_MS;
+@@ -52,7 +63,7 @@ export function runProcess(
+       outputBytes += chunk.byteLength;
+       if (outputBytes > maxOutputBytes) {
+         child.kill();
+-        settle(() => reject(new AppError("METADATA_EXTRACTION_FAILED", "A saída do processo excedeu o limite permitido.")));
++        settle(() => reject(new AppError(failureCode, "A saída do processo excedeu o limite permitido.")));
+         return;
+       }
+       if (target === "stdout") stdout += chunk.toString("utf8");
+@@ -66,12 +77,12 @@ export function runProcess(
+     child.stdout.on("data", (chunk: Buffer) => append("stdout", chunk));
+     child.stderr.on("data", (chunk: Buffer) => append("stderr", chunk));
+     child.on("error", (error: NodeJS.ErrnoException) => settle(() => {
+-      const code = error.code === "ENOENT" ? (options.unavailableCode ?? "PROCESS_UNAVAILABLE") : "METADATA_EXTRACTION_FAILED";
+-      reject(new AppError(code, code === "YTDLP_UNAVAILABLE" ? "yt-dlp não está instalado no servidor." : "Não foi possível executar o processamento."));
++      const code = error.code === "ENOENT" ? (options.unavailableCode ?? "PROCESS_UNAVAILABLE") : failureCode;
++      reject(new AppError(code, error.code === "ENOENT" ? unavailableMessage(code as NonNullable<RunProcessOptions["unavailableCode"]>) : failureMessage));
+     }));
+     child.on("close", (exitCode) => settle(() => {
+       if (exitCode === 0) resolve({ stdout, stderr, exitCode });
+-      else reject(new AppError("METADATA_EXTRACTION_FAILED", "Não foi possível obter os dados do vídeo.", stderr.slice(0, 2_000)));
++      else reject(new AppError(failureCode, failureMessage, stderr.slice(0, 2_000)));
+     }));
+   });
+ }
