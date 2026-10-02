@@ -9,7 +9,7 @@ export const maxDuration = 120;
 
 const ChatMessageSchema = z.object({
   role: z.enum(["user", "assistant"]),
-  content: z.string().trim().min(1).max(20_000),
+  content: z.string().trim().min(1).max(100_000),
 });
 
 const RequestSchema = z.object({
