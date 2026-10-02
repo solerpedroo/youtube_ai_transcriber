@@ -23,8 +23,15 @@ export type RunTranscriptionInput = {
   model: string;
   language?: string;
   concurrency?: number;
+  signal?: AbortSignal;
   onProgress?: (event: Extract<TranscriptionProgressEvent, { type: "status" }>) => void;
 };
+
+function assertNotAborted(signal?: AbortSignal): void {
+  if (signal?.aborted) {
+    throw new AppError("TRANSCRIPTION_FAILED", "A transcrição foi cancelada.");
+  }
+}
 
 async function mapPool<T, R>(
   items: readonly T[],
@@ -62,21 +69,26 @@ export async function runTranscriptionPipeline(input: RunTranscriptionInput): Pr
     language: input.language,
   };
   const emit = input.onProgress;
+  const signal = input.signal;
+  assertNotAborted(signal);
   const jobDirectory = await createJobDirectory();
 
   try {
     emit?.({ type: "status", status: "downloading_audio", message: "Baixando áudio do YouTube..." });
     const sourcePath = await extractAudio(input.url, jobDirectory);
+    assertNotAborted(signal);
 
     emit?.({ type: "status", status: "processing_audio", message: "Normalizando áudio..." });
     const normalizedPath = join(jobDirectory, "audio.mp3");
     await normalizeAudio(sourcePath, normalizedPath);
+    assertNotAborted(signal);
     const durationSeconds = await probeAudioDurationSeconds(normalizedPath);
 
     emit?.({ type: "status", status: "chunking_audio", message: "Dividindo áudio em partes..." });
     const chunksDirectory = join(jobDirectory, "chunks");
     await mkdir(chunksDirectory, { recursive: true });
     const chunks = await chunkAudio(normalizedPath, chunksDirectory, durationSeconds);
+    assertNotAborted(signal);
 
     emit?.({
       type: "status",
@@ -91,7 +103,8 @@ export async function runTranscriptionPipeline(input: RunTranscriptionInput): Pr
       chunks,
       input.concurrency ?? DEFAULT_TRANSCRIPTION_CONCURRENCY,
       async (chunk) => {
-        const result = await provider.transcribe(chunk.path, options);
+        assertNotAborted(signal);
+        const result = await provider.transcribe(chunk.path, options, signal);
         completed += 1;
         emit?.({
           type: "status",
@@ -104,6 +117,7 @@ export async function runTranscriptionPipeline(input: RunTranscriptionInput): Pr
       },
     );
 
+    assertNotAborted(signal);
     emit?.({ type: "status", status: "merging", message: "Unificando segmentos..." });
     const merged = mergeTranscriptChunks(chunkResults);
     if (merged.segments.length === 0) {
