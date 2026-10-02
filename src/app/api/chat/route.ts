@@ -12,6 +12,16 @@ const ChatMessageSchema = z.object({
   content: z.string().trim().min(1).max(100_000),
 });
 
+const TranscriptSegmentSchema = z.object({
+  id: z.string().min(1).optional(),
+  start: z.number().finite().nonnegative(),
+  end: z.number().finite().nonnegative(),
+  text: z.string().max(8_000),
+}).refine((segment) => segment.end >= segment.start, {
+  message: "O término do segmento deve ser posterior ao início.",
+  path: ["end"],
+});
+
 const RequestSchema = z.object({
   provider: AIProviderIdSchema,
   apiKey: z.string().trim().min(1).max(512),
@@ -19,6 +29,7 @@ const RequestSchema = z.object({
   baseUrl: z.string().trim().url().optional(),
   videoTitle: z.string().trim().max(500).optional().default("Untitled video"),
   transcriptText: z.string().max(100_000).optional(),
+  transcriptSegments: z.array(TranscriptSegmentSchema).max(50_000).optional(),
   messages: z.array(ChatMessageSchema).min(1).max(40),
 }).superRefine((value, context) => {
   if (value.provider === "openai-compatible" && !value.baseUrl) {
@@ -64,6 +75,12 @@ export async function POST(request: Request) {
     if (path === "provider" || path === "model" || path === "apiKey") {
       return Response.json({ code: "INVALID_PROVIDER", message: "Informe provedor, modelo e chave de API válidos." }, { status: 400 });
     }
+    if (path === "transcriptSegments") {
+      return Response.json({
+        code: "CHAT_FAILED",
+        message: issue?.message ?? "Segmentos de transcrição inválidos para o chat.",
+      }, { status: 400 });
+    }
     return Response.json({ code: "CHAT_FAILED", message: "Mensagens de chat inválidas." }, { status: 400 });
   }
 
@@ -85,6 +102,12 @@ export async function POST(request: Request) {
           const messages = buildChatMessages({
             videoTitle: body.data.videoTitle,
             transcriptText: body.data.transcriptText,
+            transcriptSegments: body.data.transcriptSegments?.map((segment, index) => ({
+              id: segment.id ?? `segment-${index + 1}`,
+              start: segment.start,
+              end: segment.end,
+              text: segment.text,
+            })),
             messages: body.data.messages,
           });
 

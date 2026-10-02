@@ -1,8 +1,8 @@
 # Status do projeto
 
-- Wave: W06 — AI chat (Fase 6)
+- Wave: W07 — Transcript grounding (Fase 7)
 - State: complete
-- Last completed: W06 — AI chat (Fase 6)
-- Next action: W07 — implementar grounding da transcrição com retrieval e citações.
-- Last review: docs/reviews/W06/REVIEW.md
+- Last completed: W07 — Transcript grounding (Fase 7)
+- Next action: W08 — Private YouTube (cookies / yt-dlp autenticado).
+- Last review: docs/reviews/W07/REVIEW.md
 - Updated: 2026-10-02

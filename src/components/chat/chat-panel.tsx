@@ -4,6 +4,7 @@ import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { MessageSquareText, Subtitles } from "lucide-react";
 import type { ChatMessage, Conversation, VideoProject } from "@/types";
+import { extractCitations } from "@/lib/ai/citations";
 import { ChatInput } from "@/components/chat/chat-input";
 import { ChatMessageBubble } from "@/components/chat/chat-message";
 import { SuggestedActions } from "@/components/chat/suggested-actions";
@@ -12,6 +13,7 @@ import { useSettingsStore } from "@/stores/settings-store";
 
 type ChatPanelProps = {
   project: VideoProject;
+  onSeek?: (seconds: number) => void;
 };
 
 type StreamEvent =
@@ -28,7 +30,7 @@ function createMessage(role: ChatMessage["role"], content: string): ChatMessage 
   };
 }
 
-export function ChatPanel({ project }: ChatPanelProps) {
+export function ChatPanel({ project, onSeek }: ChatPanelProps) {
   const saveConversation = useProjectStore((state) => state.saveConversation);
   const chatProvider = useSettingsStore((state) => state.settings.chatProvider);
   const hasHydratedSettings = useSettingsStore((state) => state.hasHydrated);
@@ -99,7 +101,16 @@ export function ChatPanel({ project }: ChatPanelProps) {
           model: chatProvider.model,
           baseUrl: chatProvider.baseUrl,
           videoTitle: project.metadata.title,
-          transcriptText: project.transcript.fullText,
+          ...(project.transcript.segments.length > 0
+            ? {
+                transcriptSegments: project.transcript.segments.map((segment) => ({
+                  id: segment.id,
+                  start: segment.start,
+                  end: segment.end,
+                  text: segment.text,
+                })),
+              }
+            : { transcriptText: project.transcript.fullText }),
           messages: history.map((message) => ({ role: message.role, content: message.content })),
         }),
       });
@@ -134,18 +145,27 @@ export function ChatPanel({ project }: ChatPanelProps) {
         }
       }
 
+      const finalContent = assistantText || "Não foi possível gerar uma resposta.";
+      const citations = extractCitations(finalContent);
       const finalized = nextMessages.map((message) =>
-        message.id === assistantMessage.id ? { ...message, content: assistantText || "Não foi possível gerar uma resposta." } : message,
+        message.id === assistantMessage.id
+          ? { ...message, content: finalContent, citations: citations.length > 0 ? citations : undefined }
+          : message,
       );
       setMessages(finalized);
       persist(finalized);
     } catch (requestError) {
       if (abortController.signal.aborted) {
-        const stopped = nextMessages.map((message) =>
-          message.id === assistantMessage.id
-            ? { ...message, content: message.content || "Resposta interrompida." }
-            : message,
-        );
+        const stopped = nextMessages.map((message) => {
+          if (message.id !== assistantMessage.id) return message;
+          const content = message.content || "Resposta interrompida.";
+          const citations = extractCitations(content);
+          return {
+            ...message,
+            content,
+            citations: citations.length > 0 ? citations : undefined,
+          };
+        });
         setMessages(stopped);
         persist(stopped);
         return;
@@ -194,7 +214,9 @@ export function ChatPanel({ project }: ChatPanelProps) {
                 Pergunte qualquer coisa sobre o vídeo ou use um atalho abaixo.
               </div>
             ) : (
-              messages.map((message) => <ChatMessageBubble key={message.id} message={message} />)
+              messages.map((message) => (
+                <ChatMessageBubble key={message.id} message={message} onSeek={onSeek} />
+              ))
             )}
           </div>
 
