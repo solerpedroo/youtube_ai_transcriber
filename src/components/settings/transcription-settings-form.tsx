@@ -8,9 +8,9 @@ import { useSettingsStore } from "@/stores/settings-store";
 
 const PROVIDERS: Array<{ id: TranscriptionProviderId; label: string; models: string[] }> = [
   { id: "groq", label: "Groq", models: ["whisper-large-v3-turbo", "whisper-large-v3"] },
-  { id: "openai", label: "OpenAI", models: ["whisper-1", "gpt-4o-mini-transcribe", "gpt-4o-transcribe"] },
+  // Only models that support verbose_json + segment timestamps in the current adapter.
+  { id: "openai", label: "OpenAI", models: ["whisper-1"] },
 ];
-
 export function TranscriptionSettingsForm() {
   const settings = useSettingsStore((state) => state.settings);
   const updateSettings = useSettingsStore((state) => state.updateSettings);
