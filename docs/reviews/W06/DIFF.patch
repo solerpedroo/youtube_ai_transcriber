@@ -1,0 +1,1380 @@
+diff --git a/README.md b/README.md
+index 32e006e..4b077cf 100644
+--- a/README.md
++++ b/README.md
+@@ -9,7 +9,7 @@ npm install
+ npm run dev
+ ```
+ 
+-Para carregar metadata, legendas e transcrever áudio, instale `yt-dlp` e `ffmpeg`/`ffprobe` no `PATH` da máquina que executa o Next.js. Configure a chave do provedor de transcrição (Groq ou OpenAI) em Configurações. A aplicação não persiste áudio no servidor; legendas existentes do YouTube são preferidas antes da transcrição por áudio.
++Para carregar metadata, legendas e transcrever áudio, instale `yt-dlp` e `ffmpeg`/`ffprobe` no `PATH` da máquina que executa o Next.js. Em Configurações, informe as chaves do provedor de transcrição e do chat (OpenAI, Anthropic, Gemini, Groq ou endpoint OpenAI-compatible). A aplicação não persiste áudio no servidor; legendas existentes do YouTube são preferidas antes da transcrição por áudio.
+ 
+ ```powershell
+ npm test
+diff --git a/docs/STATUS.md b/docs/STATUS.md
+index ea8fa14..39d6584 100644
+--- a/docs/STATUS.md
++++ b/docs/STATUS.md
+@@ -1,7 +1,7 @@
+ # Status do projeto
+ 
+-- Wave: W05 — Workspace (Fase 5)
+-- State: complete
++- Wave: W06 — AI chat (Fase 6)
++- State: in_progress
+ - Last completed: W05 — Workspace (Fase 5)
+ - Next action: W06 — implementar chat com provedores de IA e streaming.
+ - Last review: docs/reviews/W05/REVIEW.md
+diff --git a/src/app/api/chat/route.ts b/src/app/api/chat/route.ts
+new file mode 100644
+index 0000000..262b793
+--- /dev/null
++++ b/src/app/api/chat/route.ts
+@@ -0,0 +1,124 @@
++import { z } from "zod";
++import { isAppError } from "@/lib/utils/errors";
++import { buildChatMessages } from "@/lib/ai/context-builder";
++import { getAIProvider } from "@/lib/ai/provider-factory";
++import { AIProviderIdSchema } from "@/types";
++
++export const runtime = "nodejs";
++export const maxDuration = 120;
++
++const ChatMessageSchema = z.object({
++  role: z.enum(["user", "assistant"]),
++  content: z.string().trim().min(1).max(20_000),
++});
++
++const RequestSchema = z.object({
++  provider: AIProviderIdSchema,
++  apiKey: z.string().trim().min(1).max(512),
++  model: z.string().trim().min(1).max(128),
++  baseUrl: z.string().trim().url().optional(),
++  videoTitle: z.string().trim().max(500).optional().default("Untitled video"),
++  transcriptText: z.string().max(100_000).optional(),
++  messages: z.array(ChatMessageSchema).min(1).max(40),
++}).superRefine((value, context) => {
++  if (value.provider === "openai-compatible" && !value.baseUrl) {
++    context.addIssue({
++      code: "custom",
++      path: ["baseUrl"],
++      message: "Informe a base URL do endpoint OpenAI-compatible.",
++    });
++  }
++  if (value.baseUrl && !value.baseUrl.startsWith("https://")) {
++    context.addIssue({
++      code: "custom",
++      path: ["baseUrl"],
++      message: "A base URL deve usar HTTPS.",
++    });
++  }
++});
++
++type StreamEvent =
++  | { type: "delta"; text: string }
++  | { type: "done" }
++  | { type: "error"; code: string; message: string };
++
++function encode(event: StreamEvent): string {
++  return `${JSON.stringify(event)}\n`;
++}
++
++export async function POST(request: Request) {
++  let payload: unknown;
++  try {
++    payload = await request.json();
++  } catch {
++    return Response.json({ code: "CHAT_FAILED", message: "Envie um corpo JSON válido." }, { status: 400 });
++  }
++
++  const body = RequestSchema.safeParse(payload);
++  if (!body.success) {
++    const issue = body.error.issues[0];
++    const path = issue?.path[0];
++    if (path === "baseUrl") {
++      return Response.json({ code: "INVALID_PROVIDER", message: issue.message }, { status: 400 });
++    }
++    if (path === "provider" || path === "model" || path === "apiKey") {
++      return Response.json({ code: "INVALID_PROVIDER", message: "Informe provedor, modelo e chave de API válidos." }, { status: 400 });
++    }
++    return Response.json({ code: "CHAT_FAILED", message: "Mensagens de chat inválidas." }, { status: 400 });
++  }
++
++  const stream = new ReadableStream<Uint8Array>({
++    start(controller) {
++      const encoder = new TextEncoder();
++      const send = (event: StreamEvent) => {
++        if (request.signal.aborted) return;
++        controller.enqueue(encoder.encode(encode(event)));
++      };
++      const onAbort = () => {
++        try { controller.close(); } catch { /* already closed */ }
++      };
++      request.signal.addEventListener("abort", onAbort, { once: true });
++
++      void (async () => {
++        try {
++          const provider = getAIProvider(body.data.provider);
++          const messages = buildChatMessages({
++            videoTitle: body.data.videoTitle,
++            transcriptText: body.data.transcriptText,
++            messages: body.data.messages,
++          });
++
++          for await (const event of provider.streamChat(messages, {
++            apiKey: body.data.apiKey,
++            model: body.data.model,
++            baseUrl: body.data.baseUrl,
++            signal: request.signal,
++          })) {
++            if (request.signal.aborted) return;
++            send(event);
++          }
++          controller.close();
++        } catch (error) {
++          if (request.signal.aborted) return;
++          if (isAppError(error)) {
++            send({ type: "error", code: error.code, message: error.message });
++            controller.close();
++            return;
++          }
++          send({ type: "error", code: "CHAT_FAILED", message: "Não foi possível concluir o chat." });
++          controller.close();
++        } finally {
++          request.signal.removeEventListener("abort", onAbort);
++        }
++      })();
++    },
++  });
++
++  return new Response(stream, {
++    status: 200,
++    headers: {
++      "Content-Type": "application/x-ndjson; charset=utf-8",
++      "Cache-Control": "no-store",
++    },
++  });
++}
+diff --git a/src/app/settings/page.tsx b/src/app/settings/page.tsx
+index 8d60ac0..fcd9642 100644
+--- a/src/app/settings/page.tsx
++++ b/src/app/settings/page.tsx
+@@ -1,3 +1,4 @@
++import { ChatSettingsForm } from "@/components/settings/chat-settings-form";
+ import { TranscriptionSettingsForm } from "@/components/settings/transcription-settings-form";
+ import { PhaseNotice } from "@/components/foundation/phase-notice";
+ import { AppShell } from "@/components/layout/app-shell";
+@@ -14,6 +15,23 @@ export default function SettingsPage() {
+         </p>
+ 
+         <div className="mt-8 overflow-hidden rounded-2xl border border-zinc-200 bg-white shadow-sm dark:border-zinc-800 dark:bg-zinc-900">
++          <section className="border-b border-zinc-100 p-5 dark:border-zinc-800">
++            <div className="flex gap-4">
++              <span className="grid size-9 shrink-0 place-items-center rounded-lg bg-zinc-100 text-zinc-600 dark:bg-zinc-800 dark:text-zinc-300">
++                <Bot className="size-4" />
++              </span>
++              <div className="min-w-0 flex-1">
++                <h2 className="font-medium">Provedor de IA</h2>
++                <p className="mt-1 text-sm leading-6 text-zinc-600 dark:text-zinc-400">
++                  Configure o provedor e modelo para o chat. A chave fica apenas neste navegador.
++                </p>
++                <div className="mt-4">
++                  <ChatSettingsForm />
++                </div>
++              </div>
++            </div>
++          </section>
++
+           <section className="border-b border-zinc-100 p-5 dark:border-zinc-800">
+             <div className="flex gap-4">
+               <span className="grid size-9 shrink-0 place-items-center rounded-lg bg-zinc-100 text-zinc-600 dark:bg-zinc-800 dark:text-zinc-300">
+@@ -31,19 +49,6 @@ export default function SettingsPage() {
+             </div>
+           </section>
+ 
+-          <section className="flex gap-4 border-b border-zinc-100 p-5 dark:border-zinc-800">
+-            <span className="grid size-9 shrink-0 place-items-center rounded-lg bg-zinc-100 text-zinc-600 dark:bg-zinc-800 dark:text-zinc-300">
+-              <Bot className="size-4" />
+-            </span>
+-            <div>
+-              <h2 className="font-medium">Provedor de IA</h2>
+-              <p className="mt-1 text-sm leading-6 text-zinc-600 dark:text-zinc-400">
+-                Configure o provedor e modelo para o chat.
+-              </p>
+-              <span className="mt-2 inline-block text-xs font-medium text-zinc-400">Em breve</span>
+-            </div>
+-          </section>
+-
+           <section className="flex gap-4 border-b border-zinc-100 p-5 dark:border-zinc-800">
+             <span className="grid size-9 shrink-0 place-items-center rounded-lg bg-zinc-100 text-zinc-600 dark:bg-zinc-800 dark:text-zinc-300">
+               <Video className="size-4" />
+@@ -75,7 +80,7 @@ export default function SettingsPage() {
+           <PhaseNotice>
+             <span className="inline-flex items-center gap-2">
+               <ShieldCheck className="size-4" />
+-              As chaves de transcrição ficam apenas neste navegador e não devem ser registradas em logs do servidor.
++              As chaves de chat e transcrição ficam apenas neste navegador e não devem ser registradas em logs do servidor.
+             </span>
+           </PhaseNotice>
+         </div>
+diff --git a/src/components/chat/chat-input.tsx b/src/components/chat/chat-input.tsx
+new file mode 100644
+index 0000000..a793a7c
+--- /dev/null
++++ b/src/components/chat/chat-input.tsx
+@@ -0,0 +1,60 @@
++"use client";
++
++import { useState, type FormEvent, type KeyboardEvent } from "react";
++import { LoaderCircle, SendHorizonal } from "lucide-react";
++import { Button } from "@/components/ui/button";
++
++type ChatInputProps = {
++  disabled?: boolean;
++  isStreaming?: boolean;
++  onSend: (content: string) => void;
++  onStop?: () => void;
++};
++
++export function ChatInput({ disabled, isStreaming, onSend, onStop }: ChatInputProps) {
++  const [value, setValue] = useState("");
++
++  function submit() {
++    const content = value.trim();
++    if (!content || disabled || isStreaming) return;
++    onSend(content);
++    setValue("");
++  }
++
++  function handleSubmit(event: FormEvent<HTMLFormElement>) {
++    event.preventDefault();
++    submit();
++  }
++
++  function handleKeyDown(event: KeyboardEvent<HTMLTextAreaElement>) {
++    if (event.key === "Enter" && !event.shiftKey) {
++      event.preventDefault();
++      submit();
++    }
++  }
++
++  return (
++    <form className="flex items-end gap-2" onSubmit={handleSubmit}>
++      <label className="sr-only" htmlFor="chat-input">Pergunta sobre o vídeo</label>
++      <textarea
++        id="chat-input"
++        rows={2}
++        value={value}
++        disabled={disabled}
++        onChange={(event) => setValue(event.target.value)}
++        onKeyDown={handleKeyDown}
++        placeholder="Faça uma pergunta sobre o vídeo..."
++        className="min-h-16 flex-1 resize-none rounded-xl border border-zinc-200 bg-zinc-50 px-3 py-2 text-sm outline-none focus:border-violet-500 focus:ring-4 focus:ring-violet-500/10 disabled:opacity-60 dark:border-zinc-700 dark:bg-zinc-950"
++      />
++      {isStreaming ? (
++        <Button type="button" variant="outline" onClick={onStop}>
++          <LoaderCircle className="size-4 animate-spin" />Parar
++        </Button>
++      ) : (
++        <Button type="submit" disabled={disabled || !value.trim()}>
++          <SendHorizonal className="size-4" />Enviar
++        </Button>
++      )}
++    </form>
++  );
++}
+diff --git a/src/components/chat/chat-message.tsx b/src/components/chat/chat-message.tsx
+new file mode 100644
+index 0000000..ef7e20b
+--- /dev/null
++++ b/src/components/chat/chat-message.tsx
+@@ -0,0 +1,24 @@
++"use client";
++
++import type { ChatMessage } from "@/types";
++
++type ChatMessageBubbleProps = {
++  message: ChatMessage;
++};
++
++export function ChatMessageBubble({ message }: ChatMessageBubbleProps) {
++  const isUser = message.role === "user";
++  return (
++    <div className={`flex ${isUser ? "justify-end" : "justify-start"}`}>
++      <div
++        className={`max-w-[92%] rounded-2xl px-3 py-2 text-sm leading-6 whitespace-pre-wrap ${
++          isUser
++            ? "bg-violet-600 text-white"
++            : "bg-zinc-100 text-zinc-800 dark:bg-zinc-800 dark:text-zinc-100"
++        }`}
++      >
++        {message.content || (isUser ? "" : "…")}
++      </div>
++    </div>
++  );
++}
+diff --git a/src/components/chat/chat-panel.tsx b/src/components/chat/chat-panel.tsx
+new file mode 100644
+index 0000000..958b2c0
+--- /dev/null
++++ b/src/components/chat/chat-panel.tsx
+@@ -0,0 +1,219 @@
++"use client";
++
++import { useEffect, useRef, useState } from "react";
++import Link from "next/link";
++import { MessageSquareText, Subtitles } from "lucide-react";
++import type { ChatMessage, Conversation, VideoProject } from "@/types";
++import { ChatInput } from "@/components/chat/chat-input";
++import { ChatMessageBubble } from "@/components/chat/chat-message";
++import { SuggestedActions } from "@/components/chat/suggested-actions";
++import { useProjectStore } from "@/stores/project-store";
++import { useSettingsStore } from "@/stores/settings-store";
++
++type ChatPanelProps = {
++  project: VideoProject;
++};
++
++type StreamEvent =
++  | { type: "delta"; text: string }
++  | { type: "done" }
++  | { type: "error"; code: string; message: string };
++
++function createMessage(role: ChatMessage["role"], content: string): ChatMessage {
++  return {
++    id: crypto.randomUUID(),
++    role,
++    content,
++    createdAt: new Date().toISOString(),
++  };
++}
++
++export function ChatPanel({ project }: ChatPanelProps) {
++  const saveConversation = useProjectStore((state) => state.saveConversation);
++  const chatProvider = useSettingsStore((state) => state.settings.chatProvider);
++  const hasHydratedSettings = useSettingsStore((state) => state.hasHydrated);
++
++  const existing = project.conversations[0];
++  const [conversationId] = useState(() => existing?.id ?? crypto.randomUUID());
++  const [messages, setMessages] = useState<ChatMessage[]>(() => existing?.messages ?? []);
++  const [error, setError] = useState<string | null>(null);
++  const [isStreaming, setIsStreaming] = useState(false);
++  const abortRef = useRef<AbortController | null>(null);
++  const listRef = useRef<HTMLDivElement | null>(null);
++
++  const canChat = Boolean(project.transcript && chatProvider.apiKey.trim());
++
++  useEffect(() => () => {
++    abortRef.current?.abort();
++  }, []);
++
++  useEffect(() => {
++    listRef.current?.scrollTo({ top: listRef.current.scrollHeight, behavior: "smooth" });
++  }, [messages, isStreaming]);
++
++  function persist(nextMessages: ChatMessage[]) {
++    const now = new Date().toISOString();
++    const firstUser = nextMessages.find((message) => message.role === "user");
++    const conversation: Conversation = {
++      id: conversationId,
++      title: firstUser?.content.slice(0, 80) || "Conversa sobre o vídeo",
++      messages: nextMessages,
++      createdAt: existing?.createdAt ?? now,
++      updatedAt: now,
++    };
++    saveConversation(project.id, conversation);
++  }
++
++  async function sendPrompt(content: string) {
++    if (!canChat || isStreaming) return;
++    if (!chatProvider.apiKey.trim()) {
++      setError("Configure a chave de API do chat em Configurações.");
++      return;
++    }
++    if (!project.transcript) {
++      setError("Gere ou importe uma transcrição antes de usar o chat.");
++      return;
++    }
++
++    const userMessage = createMessage("user", content);
++    const assistantMessage = createMessage("assistant", "");
++    const history = [...messages, userMessage];
++    const nextMessages = [...history, assistantMessage];
++    setMessages(nextMessages);
++    setError(null);
++    setIsStreaming(true);
++
++    abortRef.current?.abort();
++    const abortController = new AbortController();
++    abortRef.current = abortController;
++
++    try {
++      const response = await fetch("/api/chat", {
++        method: "POST",
++        headers: { "Content-Type": "application/json" },
++        signal: abortController.signal,
++        body: JSON.stringify({
++          provider: chatProvider.provider,
++          apiKey: chatProvider.apiKey,
++          model: chatProvider.model,
++          baseUrl: chatProvider.baseUrl,
++          videoTitle: project.metadata.title,
++          transcriptText: project.transcript.fullText,
++          messages: history.map((message) => ({ role: message.role, content: message.content })),
++        }),
++      });
++
++      if (!response.ok) {
++        const body = await response.json() as { message?: string };
++        throw new Error(body.message ?? "Não foi possível iniciar o chat.");
++      }
++      if (!response.body) throw new Error("Resposta de chat sem corpo.");
++
++      const reader = response.body.getReader();
++      const decoder = new TextDecoder();
++      let buffer = "";
++      let assistantText = "";
++
++      while (true) {
++        const { done, value } = await reader.read();
++        if (done) break;
++        buffer += decoder.decode(value, { stream: true });
++        const lines = buffer.split("\n");
++        buffer = lines.pop() ?? "";
++        for (const line of lines) {
++          if (!line.trim()) continue;
++          const event = JSON.parse(line) as StreamEvent;
++          if (event.type === "delta") {
++            assistantText += event.text;
++            setMessages((current) => current.map((message) =>
++              message.id === assistantMessage.id ? { ...message, content: assistantText } : message,
++            ));
++          }
++          if (event.type === "error") throw new Error(event.message);
++        }
++      }
++
++      const finalized = nextMessages.map((message) =>
++        message.id === assistantMessage.id ? { ...message, content: assistantText || "Não foi possível gerar uma resposta." } : message,
++      );
++      setMessages(finalized);
++      persist(finalized);
++    } catch (requestError) {
++      if (abortController.signal.aborted) {
++        const stopped = nextMessages.map((message) =>
++          message.id === assistantMessage.id
++            ? { ...message, content: message.content || "Resposta interrompida." }
++            : message,
++        );
++        setMessages(stopped);
++        persist(stopped);
++        return;
++      }
++      setError(requestError instanceof Error ? requestError.message : "Não foi possível concluir o chat.");
++      setMessages(history);
++    } finally {
++      if (abortRef.current === abortController) abortRef.current = null;
++      setIsStreaming(false);
++    }
++  }
++
++  if (!hasHydratedSettings) {
++    return <p className="text-sm text-zinc-500">Carregando preferências do chat...</p>;
++  }
++
++  return (
++    <div className="flex h-full min-h-[28rem] flex-col">
++      <div className="flex items-center gap-2">
++        <MessageSquareText className="size-4 text-violet-600 dark:text-violet-400" />
++        <h2 className="font-semibold">Assistente de IA</h2>
++      </div>
++
++      {!project.transcript ? (
++        <div className="mt-5 flex flex-1 flex-col items-center justify-center text-center">
++          <span className="grid size-10 place-items-center rounded-xl bg-zinc-100 text-zinc-500 dark:bg-zinc-800">
++            <Subtitles className="size-5" />
++          </span>
++          <p className="mt-4 text-sm font-medium">Transcrição necessária</p>
++          <p className="mt-2 text-sm leading-6 text-zinc-500">
++            Importe legendas ou gere uma transcrição por IA para liberar o chat.
++          </p>
++        </div>
++      ) : !chatProvider.apiKey.trim() ? (
++        <div className="mt-5 flex flex-1 flex-col items-center justify-center text-center">
++          <p className="text-sm font-medium">Configure um provedor de chat</p>
++          <p className="mt-2 text-sm leading-6 text-zinc-500">
++            Informe a chave de API em <Link href="/settings" className="text-violet-700 underline dark:text-violet-300">Configurações</Link>.
++          </p>
++        </div>
++      ) : (
++        <>
++          <div ref={listRef} className="mt-4 flex-1 space-y-3 overflow-y-auto pr-1">
++            {messages.length === 0 ? (
++              <div className="rounded-xl border border-dashed border-zinc-300 p-4 text-sm text-zinc-500 dark:border-zinc-700">
++                Pergunte qualquer coisa sobre o vídeo ou use um atalho abaixo.
++              </div>
++            ) : (
++              messages.map((message) => <ChatMessageBubble key={message.id} message={message} />)
++            )}
++          </div>
++
++          {error && (
++            <p className="mt-3 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700 dark:border-red-950 dark:bg-red-950/30 dark:text-red-300" role="alert">
++              {error}
++            </p>
++          )}
++
++          <div className="mt-3 space-y-3">
++            <SuggestedActions disabled={isStreaming} onSelect={(prompt) => void sendPrompt(prompt)} />
++            <ChatInput
++              disabled={!canChat}
++              isStreaming={isStreaming}
++              onSend={(content) => void sendPrompt(content)}
++              onStop={() => abortRef.current?.abort()}
++            />
++          </div>
++        </>
++      )}
++    </div>
++  );
++}
+diff --git a/src/components/chat/suggested-actions.tsx b/src/components/chat/suggested-actions.tsx
+new file mode 100644
+index 0000000..c83d8e1
+--- /dev/null
++++ b/src/components/chat/suggested-actions.tsx
+@@ -0,0 +1,28 @@
++"use client";
++
++import { SUGGESTED_CHAT_ACTIONS } from "@/lib/ai/suggested-actions";
++import { Button } from "@/components/ui/button";
++
++type SuggestedActionsProps = {
++  disabled?: boolean;
++  onSelect: (prompt: string) => void;
++};
++
++export function SuggestedActions({ disabled, onSelect }: SuggestedActionsProps) {
++  return (
++    <div className="flex flex-wrap gap-2">
++      {SUGGESTED_CHAT_ACTIONS.map((action) => (
++        <Button
++          key={action.id}
++          type="button"
++          size="sm"
++          variant="outline"
++          disabled={disabled}
++          onClick={() => onSelect(action.prompt)}
++        >
++          {action.label}
++        </Button>
++      ))}
++    </div>
++  );
++}
+diff --git a/src/components/settings/chat-settings-form.tsx b/src/components/settings/chat-settings-form.tsx
+new file mode 100644
+index 0000000..b3d3d64
+--- /dev/null
++++ b/src/components/settings/chat-settings-form.tsx
+@@ -0,0 +1,136 @@
++"use client";
++
++import { useState, type FormEvent } from "react";
++import type { AIProviderId } from "@/types";
++import { Button } from "@/components/ui/button";
++import { Input } from "@/components/ui/input";
++import { useSettingsStore } from "@/stores/settings-store";
++
++const PROVIDERS: Array<{
++  id: AIProviderId;
++  label: string;
++  models: string[];
++  needsBaseUrl?: boolean;
++}> = [
++  { id: "openai", label: "OpenAI", models: ["gpt-4.1-mini", "gpt-4.1", "gpt-4o-mini"] },
++  { id: "anthropic", label: "Anthropic", models: ["claude-sonnet-4-5", "claude-haiku-4-5"] },
++  { id: "gemini", label: "Google Gemini", models: ["gemini-2.5-flash", "gemini-2.5-pro"] },
++  { id: "groq", label: "Groq", models: ["llama-3.3-70b-versatile", "openai/gpt-oss-120b"] },
++  {
++    id: "openai-compatible",
++    label: "OpenAI-compatible",
++    models: ["custom-model"],
++    needsBaseUrl: true,
++  },
++];
++
++export function ChatSettingsForm() {
++  const settings = useSettingsStore((state) => state.settings);
++  const updateSettings = useSettingsStore((state) => state.updateSettings);
++  const hasHydrated = useSettingsStore((state) => state.hasHydrated);
++  const [saved, setSaved] = useState(false);
++  const current = settings.chatProvider;
++  const providerMeta = PROVIDERS.find((item) => item.id === current.provider) ?? PROVIDERS[0]!;
++
++  function handleSubmit(event: FormEvent<HTMLFormElement>) {
++    event.preventDefault();
++    const form = new FormData(event.currentTarget);
++    const provider = String(form.get("provider") ?? "openai") as AIProviderId;
++    const model = String(form.get("model") ?? "").trim();
++    const apiKey = String(form.get("apiKey") ?? "");
++    const baseUrlValue = String(form.get("baseUrl") ?? "").trim();
++    updateSettings({
++      chatProvider: {
++        provider,
++        model,
++        apiKey,
++        baseUrl: provider === "openai-compatible" && baseUrlValue ? baseUrlValue : undefined,
++      },
++    });
++    setSaved(true);
++    window.setTimeout(() => setSaved(false), 2_000);
++  }
++
++  if (!hasHydrated) {
++    return <p className="text-sm text-zinc-500">Carregando preferências locais...</p>;
++  }
++
++  return (
++    <form className="space-y-4" onSubmit={handleSubmit}>
++      <div className="grid gap-4 sm:grid-cols-2">
++        <label className="grid gap-1.5 text-sm">
++          <span className="font-medium">Provedor</span>
++          <select
++            name="provider"
++            value={current.provider}
++            className="h-10 rounded-lg border border-zinc-300 bg-white px-3 dark:border-zinc-700 dark:bg-zinc-950"
++            onChange={(event) => {
++              const provider = event.target.value as AIProviderId;
++              const meta = PROVIDERS.find((item) => item.id === provider) ?? PROVIDERS[0]!;
++              updateSettings({
++                chatProvider: {
++                  provider,
++                  apiKey: current.apiKey,
++                  model: meta.models[0] ?? current.model,
++                  baseUrl: meta.needsBaseUrl ? current.baseUrl : undefined,
++                },
++              });
++            }}
++          >
++            {PROVIDERS.map((provider) => (
++              <option key={provider.id} value={provider.id}>{provider.label}</option>
++            ))}
++          </select>
++        </label>
++        <label className="grid gap-1.5 text-sm">
++          <span className="font-medium">Modelo</span>
++          <Input
++            name="model"
++            value={current.model}
++            onChange={(event) => updateSettings({
++              chatProvider: { ...current, model: event.target.value },
++            })}
++            list="chat-model-suggestions"
++            placeholder="ID do modelo"
++          />
++          <datalist id="chat-model-suggestions">
++            {providerMeta.models.map((model) => (
++              <option key={model} value={model} />
++            ))}
++          </datalist>
++        </label>
++      </div>
++
++      {providerMeta.needsBaseUrl && (
++        <label className="grid gap-1.5 text-sm">
++          <span className="font-medium">Base URL</span>
++          <Input
++            name="baseUrl"
++            type="url"
++            value={current.baseUrl ?? ""}
++            onChange={(event) => updateSettings({
++              chatProvider: { ...current, baseUrl: event.target.value },
++            })}
++            placeholder="https://exemplo.com/v1"
++          />
++        </label>
++      )}
++
++      <label className="grid gap-1.5 text-sm">
++        <span className="font-medium">Chave de API</span>
++        <Input
++          name="apiKey"
++          type="password"
++          autoComplete="off"
++          defaultValue={current.apiKey}
++          placeholder="Armazenada apenas neste navegador"
++        />
++      </label>
++
++      <div className="flex items-center gap-3">
++        <Button type="submit">Salvar chat</Button>
++        {saved && <p className="text-sm text-emerald-700 dark:text-emerald-300">Preferências salvas localmente.</p>}
++      </div>
++    </form>
++  );
++}
+diff --git a/src/components/transcription/video-workspace.tsx b/src/components/transcription/video-workspace.tsx
+index feafa7d..f4ab54e 100644
+--- a/src/components/transcription/video-workspace.tsx
++++ b/src/components/transcription/video-workspace.tsx
+@@ -2,14 +2,10 @@
+ 
+ import { useEffect, useMemo, useRef, useState } from "react";
+ import { useRouter } from "next/navigation";
+-import {
+-  LoaderCircle,
+-  MessageSquareText,
+-  Subtitles,
+-  WandSparkles,
+-} from "lucide-react";
++import { LoaderCircle, WandSparkles } from "lucide-react";
+ import type { Transcript, VideoProject } from "@/types";
+ import type { TranscriptionProgressEvent } from "@/lib/transcription/types";
++import { ChatPanel } from "@/components/chat/chat-panel";
+ import { PhaseNotice } from "@/components/foundation/phase-notice";
+ import { AppShell } from "@/components/layout/app-shell";
+ import { TranscriptView } from "@/components/transcript/transcript-view";
+@@ -268,26 +264,19 @@ export function VideoWorkspace({ projectId }: { projectId: string }) {
+           </div>
+         </section>
+ 
+-        <aside className={`rounded-2xl border border-zinc-200 bg-white p-5 shadow-sm dark:border-zinc-800 dark:bg-zinc-900 ${tab === "chat" ? "block" : "hidden lg:block"}`}>
+-          <div className="flex items-center gap-2">
+-            <MessageSquareText className="size-4 text-violet-600 dark:text-violet-400" />
+-            <h2 className="font-semibold">Assistente de IA</h2>
+-          </div>
+-          <div className="mt-5 flex min-h-72 flex-col items-center justify-center text-center">
+-            <span className="grid size-10 place-items-center rounded-xl bg-zinc-100 text-zinc-500 dark:bg-zinc-800">
+-              <Subtitles className="size-5" />
+-            </span>
+-            <p className="mt-4 text-sm font-medium">Pergunte qualquer coisa sobre este vídeo.</p>
+-            <p className="mt-2 text-sm leading-6 text-zinc-500">
+-              O chat será liberado na Fase 6, após um provedor de chat configurado.
+-            </p>
+-          </div>
++        <aside
++          id="workspace-panel-chat"
++          role="tabpanel"
++          aria-labelledby="workspace-tab-chat"
++          className={`rounded-2xl border border-zinc-200 bg-white p-5 shadow-sm dark:border-zinc-800 dark:bg-zinc-900 ${tab === "chat" ? "block" : "hidden lg:block"}`}
++        >
++          <ChatPanel project={project} />
+         </aside>
+       </div>
+ 
+       <div className="mt-6">
+         <PhaseNotice>
+-          Fase 5: player, seek por timestamp, busca, cópia e exportações. O chat chega na Fase 6.
++          Fase 6: chat com streaming via provedores de IA. A recuperação avançada por trechos chega na Fase 7.
+         </PhaseNotice>
+       </div>
+     </AppShell>
+diff --git a/src/lib/ai/context-builder.test.ts b/src/lib/ai/context-builder.test.ts
+new file mode 100644
+index 0000000..4c708b6
+--- /dev/null
++++ b/src/lib/ai/context-builder.test.ts
+@@ -0,0 +1,25 @@
++import { describe, expect, it } from "vitest";
++import { buildChatMessages } from "./context-builder";
++import { MAX_TRANSCRIPT_CONTEXT_CHARS } from "./types";
++
++describe("buildChatMessages", () => {
++  it("prepends a system prompt and keeps chat turns", () => {
++    const messages = buildChatMessages({
++      videoTitle: "Sample",
++      transcriptText: "Hello from the transcript",
++      messages: [{ role: "user", content: "Resuma" }],
++    });
++    expect(messages[0]?.role).toBe("system");
++    expect(messages[0]?.content).toContain("Sample");
++    expect(messages[0]?.content).toContain("Hello from the transcript");
++    expect(messages[1]).toEqual({ role: "user", content: "Resuma" });
++  });
++
++  it("rejects oversized transcripts", () => {
++    expect(() => buildChatMessages({
++      videoTitle: "Sample",
++      transcriptText: "x".repeat(MAX_TRANSCRIPT_CONTEXT_CHARS + 1),
++      messages: [{ role: "user", content: "Oi" }],
++    })).toThrowError(expect.objectContaining({ code: "CONTEXT_TOO_LARGE" }));
++  });
++});
+diff --git a/src/lib/ai/context-builder.ts b/src/lib/ai/context-builder.ts
+new file mode 100644
+index 0000000..c67abeb
+--- /dev/null
++++ b/src/lib/ai/context-builder.ts
+@@ -0,0 +1,44 @@
++import { AppError } from "@/lib/utils/errors";
++import type { AIChatMessage } from "./types";
++import { MAX_TRANSCRIPT_CONTEXT_CHARS } from "./types";
++
++export type BuildChatContextInput = {
++  videoTitle: string;
++  transcriptText?: string;
++  messages: ReadonlyArray<{ role: "user" | "assistant"; content: string }>;
++};
++
++/** Builds provider messages with a basic transcript-aware system prompt (full retrieval arrives in W07). */
++export function buildChatMessages(input: BuildChatContextInput): AIChatMessage[] {
++  if (input.messages.length === 0) {
++    throw new AppError("CHAT_FAILED", "Envie pelo menos uma mensagem.");
++  }
++
++  const transcript = (input.transcriptText ?? "").trim();
++  if (transcript.length > MAX_TRANSCRIPT_CONTEXT_CHARS) {
++    throw new AppError(
++      "CONTEXT_TOO_LARGE",
++      "A transcrição é grande demais para o chat nesta fase. Use perguntas mais curtas ou aguarde a recuperação por trechos.",
++    );
++  }
++
++  const systemParts = [
++    "You are a helpful study assistant for a YouTube video.",
++    `Video title: ${input.videoTitle || "Untitled video"}`,
++    "Answer using the transcript when available. If the transcript does not contain the answer, say so clearly.",
++    "Prefer concise answers in the same language as the user.",
++  ];
++  if (transcript) {
++    systemParts.push("Transcript:", transcript);
++  } else {
++    systemParts.push("No transcript was provided for this conversation.");
++  }
++
++  return [
++    { role: "system", content: systemParts.join("\n\n") },
++    ...input.messages.map((message) => ({
++      role: message.role,
++      content: message.content,
++    })),
++  ];
++}
+diff --git a/src/lib/ai/http.ts b/src/lib/ai/http.ts
+new file mode 100644
+index 0000000..f6337f6
+--- /dev/null
++++ b/src/lib/ai/http.ts
+@@ -0,0 +1,62 @@
++import { AppError } from "@/lib/utils/errors";
++
++export function mapProviderHttpError(status: number, bodyText: string): AppError {
++  if (status === 401 || status === 403) {
++    return new AppError("PROVIDER_AUTH_FAILED", "A chave de API do provedor de chat foi rejeitada.");
++  }
++  if (status === 429) {
++    return new AppError("RATE_LIMITED", "O provedor de chat atingiu o limite de requisições.");
++  }
++  if (status === 413 || bodyText.toLowerCase().includes("context_length") || bodyText.toLowerCase().includes("too large")) {
++    return new AppError("CONTEXT_TOO_LARGE", "O contexto enviado excede o limite do modelo.");
++  }
++  return new AppError(
++    "CHAT_FAILED",
++    "Não foi possível obter resposta do provedor de chat.",
++    bodyText.slice(0, 500),
++  );
++}
++
++/** Parses SSE `data:` lines from a provider stream. */
++export async function* iterateSseDataLines(
++  body: ReadableStream<Uint8Array>,
++  signal?: AbortSignal,
++): AsyncGenerator<string, void, unknown> {
++  const reader = body.getReader();
++  const decoder = new TextDecoder();
++  let buffer = "";
++
++  try {
++    while (true) {
++      if (signal?.aborted) {
++        throw new AppError("CHAT_FAILED", "O chat foi cancelado.");
++      }
++      const { done, value } = await reader.read();
++      if (done) break;
++      buffer += decoder.decode(value, { stream: true });
++      const chunks = buffer.split("\n");
++      buffer = chunks.pop() ?? "";
++      for (const rawLine of chunks) {
++        const line = rawLine.trimEnd();
++        if (!line.startsWith("data:")) continue;
++        const data = line.slice(5).trimStart();
++        if (!data || data === "[DONE]") {
++          if (data === "[DONE]") return;
++          continue;
++        }
++        yield data;
++      }
++    }
++  } finally {
++    reader.releaseLock();
++  }
++}
++
++export function assertChatCredentials(apiKey: string, model: string): void {
++  if (!apiKey.trim()) {
++    throw new AppError("PROVIDER_AUTH_FAILED", "Informe a chave de API do provedor de chat.");
++  }
++  if (!model.trim()) {
++    throw new AppError("INVALID_PROVIDER", "Informe o modelo de chat.");
++  }
++}
+diff --git a/src/lib/ai/provider-factory.ts b/src/lib/ai/provider-factory.ts
+new file mode 100644
+index 0000000..e498765
+--- /dev/null
++++ b/src/lib/ai/provider-factory.ts
+@@ -0,0 +1,24 @@
++import { AppError } from "@/lib/utils/errors";
++import type { AIProviderId } from "@/types";
++import type { AIProvider } from "./types";
++import { anthropicChatProvider } from "./providers/anthropic";
++import { geminiChatProvider } from "./providers/gemini";
++import { groqChatProvider } from "./providers/groq";
++import { openAiChatProvider } from "./providers/openai";
++import { openAiCompatibleChatProvider } from "./providers/openai-compatible-provider";
++
++const PROVIDERS: Record<AIProviderId, AIProvider> = {
++  openai: openAiChatProvider,
++  anthropic: anthropicChatProvider,
++  gemini: geminiChatProvider,
++  groq: groqChatProvider,
++  "openai-compatible": openAiCompatibleChatProvider,
++};
++
++export function getAIProvider(provider: AIProviderId): AIProvider {
++  const selected = PROVIDERS[provider];
++  if (!selected) {
++    throw new AppError("INVALID_PROVIDER", "Informe um provedor de chat suportado.");
++  }
++  return selected;
++}
+diff --git a/src/lib/ai/providers/anthropic.ts b/src/lib/ai/providers/anthropic.ts
+new file mode 100644
+index 0000000..88641df
+--- /dev/null
++++ b/src/lib/ai/providers/anthropic.ts
+@@ -0,0 +1,72 @@
++import { AppError } from "@/lib/utils/errors";
++import { assertChatCredentials, iterateSseDataLines, mapProviderHttpError } from "../http";
++import type { AIChatMessage, AIChatStreamEvent, AIProvider } from "../types";
++
++function splitSystem(messages: readonly AIChatMessage[]) {
++  const system = messages.filter((message) => message.role === "system").map((message) => message.content).join("\n\n");
++  const chatMessages = messages
++    .filter((message) => message.role !== "system")
++    .map((message) => ({ role: message.role as "user" | "assistant", content: message.content }));
++  return { system, chatMessages };
++}
++
++export const anthropicChatProvider: AIProvider = {
++  id: "anthropic",
++  async *streamChat(messages, options): AsyncGenerator<AIChatStreamEvent, void, unknown> {
++    assertChatCredentials(options.apiKey, options.model);
++    if (options.signal?.aborted) {
++      throw new AppError("CHAT_FAILED", "O chat foi cancelado.");
++    }
++
++    const { system, chatMessages } = splitSystem(messages);
++    if (chatMessages.length === 0) {
++      throw new AppError("CHAT_FAILED", "Envie pelo menos uma mensagem de usuário.");
++    }
++
++    let response: Response;
++    try {
++      response = await fetch("https://api.anthropic.com/v1/messages", {
++        method: "POST",
++        headers: {
++          "x-api-key": options.apiKey,
++          "anthropic-version": "2023-06-01",
++          "Content-Type": "application/json",
++        },
++        body: JSON.stringify({
++          model: options.model,
++          max_tokens: 2_048,
++          system: system || undefined,
++          messages: chatMessages,
++          stream: true,
++        }),
++        signal: options.signal,
++      });
++    } catch (error) {
++      if (options.signal?.aborted || (error instanceof Error && error.name === "AbortError")) {
++        throw new AppError("CHAT_FAILED", "O chat foi cancelado.");
++      }
++      throw new AppError("CHAT_FAILED", "Não foi possível contatar o provedor de chat.");
++    }
++
++    if (!response.ok) {
++      throw mapProviderHttpError(response.status, await response.text());
++    }
++    if (!response.body) {
++      throw new AppError("CHAT_FAILED", "Resposta de chat sem corpo.");
++    }
++
++    for await (const data of iterateSseDataLines(response.body, options.signal)) {
++      let payload: unknown;
++      try {
++        payload = JSON.parse(data);
++      } catch {
++        continue;
++      }
++      const event = payload as { type?: string; delta?: { type?: string; text?: string } };
++      if (event.type === "content_block_delta" && event.delta?.type === "text_delta" && event.delta.text) {
++        yield { type: "delta", text: event.delta.text };
++      }
++    }
++    yield { type: "done" };
++  },
++};
+diff --git a/src/lib/ai/providers/gemini.ts b/src/lib/ai/providers/gemini.ts
+new file mode 100644
+index 0000000..a07b680
+--- /dev/null
++++ b/src/lib/ai/providers/gemini.ts
+@@ -0,0 +1,78 @@
++import { AppError } from "@/lib/utils/errors";
++import { assertChatCredentials, iterateSseDataLines, mapProviderHttpError } from "../http";
++import type { AIChatMessage, AIChatStreamEvent, AIProvider } from "../types";
++
++function toGeminiContents(messages: readonly AIChatMessage[]) {
++  const system = messages.filter((message) => message.role === "system").map((message) => message.content).join("\n\n");
++  const contents = messages
++    .filter((message) => message.role !== "system")
++    .map((message) => ({
++      role: message.role === "assistant" ? "model" : "user",
++      parts: [{ text: message.content }],
++    }));
++  return { system, contents };
++}
++
++export const geminiChatProvider: AIProvider = {
++  id: "gemini",
++  async *streamChat(messages, options): AsyncGenerator<AIChatStreamEvent, void, unknown> {
++    assertChatCredentials(options.apiKey, options.model);
++    if (options.signal?.aborted) {
++      throw new AppError("CHAT_FAILED", "O chat foi cancelado.");
++    }
++
++    const { system, contents } = toGeminiContents(messages);
++    if (contents.length === 0) {
++      throw new AppError("CHAT_FAILED", "Envie pelo menos uma mensagem de usuário.");
++    }
++
++    const model = encodeURIComponent(options.model);
++    const endpoint = `https://generativelanguage.googleapis.com/v1beta/models/${model}:streamGenerateContent?alt=sse`;
++
++    let response: Response;
++    try {
++      response = await fetch(endpoint, {
++        method: "POST",
++        headers: {
++          "Content-Type": "application/json",
++          "x-goog-api-key": options.apiKey,
++        },
++        body: JSON.stringify({
++          systemInstruction: system ? { parts: [{ text: system }] } : undefined,
++          contents,
++        }),
++        signal: options.signal,
++      });
++    } catch (error) {
++      if (options.signal?.aborted || (error instanceof Error && error.name === "AbortError")) {
++        throw new AppError("CHAT_FAILED", "O chat foi cancelado.");
++      }
++      throw new AppError("CHAT_FAILED", "Não foi possível contatar o provedor de chat.");
++    }
++
++    if (!response.ok) {
++      throw mapProviderHttpError(response.status, await response.text());
++    }
++    if (!response.body) {
++      throw new AppError("CHAT_FAILED", "Resposta de chat sem corpo.");
++    }
++
++    for await (const data of iterateSseDataLines(response.body, options.signal)) {
++      let payload: unknown;
++      try {
++        payload = JSON.parse(data);
++      } catch {
++        continue;
++      }
++      const parts = (payload as {
++        candidates?: Array<{ content?: { parts?: Array<{ text?: string }> } }>;
++      }).candidates?.[0]?.content?.parts ?? [];
++      for (const part of parts) {
++        if (typeof part.text === "string" && part.text.length > 0) {
++          yield { type: "delta", text: part.text };
++        }
++      }
++    }
++    yield { type: "done" };
++  },
++};
+diff --git a/src/lib/ai/providers/groq.ts b/src/lib/ai/providers/groq.ts
+new file mode 100644
+index 0000000..3713169
+--- /dev/null
++++ b/src/lib/ai/providers/groq.ts
+@@ -0,0 +1,6 @@
++import { createOpenAiCompatibleProvider } from "./openai-compatible";
++
++export const groqChatProvider = createOpenAiCompatibleProvider(
++  "groq",
++  "https://api.groq.com/openai/v1/chat/completions",
++);
+diff --git a/src/lib/ai/providers/openai-compatible-provider.ts b/src/lib/ai/providers/openai-compatible-provider.ts
+new file mode 100644
+index 0000000..66932d0
+--- /dev/null
++++ b/src/lib/ai/providers/openai-compatible-provider.ts
+@@ -0,0 +1,6 @@
++import { createOpenAiCompatibleProvider } from "./openai-compatible";
++
++export const openAiCompatibleChatProvider = createOpenAiCompatibleProvider(
++  "openai-compatible",
++  "https://api.openai.com/v1/chat/completions",
++);
+diff --git a/src/lib/ai/providers/openai-compatible.test.ts b/src/lib/ai/providers/openai-compatible.test.ts
+new file mode 100644
+index 0000000..c8f03da
+--- /dev/null
++++ b/src/lib/ai/providers/openai-compatible.test.ts
+@@ -0,0 +1,51 @@
++import { describe, expect, it, vi } from "vitest";
++import { streamOpenAiCompatibleChat } from "./providers/openai-compatible";
++
++function sseResponse(lines: string[], status = 200): Response {
++  return new Response(lines.join("\n"), {
++    status,
++    headers: { "Content-Type": "text/event-stream" },
++  });
++}
++
++describe("streamOpenAiCompatibleChat", () => {
++  it("yields text deltas from OpenAI-compatible SSE", async () => {
++    vi.spyOn(globalThis, "fetch").mockResolvedValue(
++      sseResponse([
++        'data: {"choices":[{"delta":{"content":"Olá"}}]}',
++        "",
++        'data: {"choices":[{"delta":{"content":" mundo"}}]}',
++        "",
++        "data: [DONE]",
++        "",
++      ]),
++    );
++
++    const events = [];
++    for await (const event of streamOpenAiCompatibleChat(
++      "https://api.openai.com/v1/chat/completions",
++      [{ role: "user", content: "Oi" }],
++      { apiKey: "sk-test", model: "gpt-4.1-mini" },
++    )) {
++      events.push(event);
++    }
++
++    expect(events).toEqual([
++      { type: "delta", text: "Olá" },
++      { type: "delta", text: " mundo" },
++      { type: "done" },
++    ]);
++    vi.restoreAllMocks();
++  });
++
++  it("maps unauthorized responses", async () => {
++    vi.spyOn(globalThis, "fetch").mockResolvedValue(new Response("nope", { status: 401 }));
++    const iterator = streamOpenAiCompatibleChat(
++      "https://api.openai.com/v1/chat/completions",
++      [{ role: "user", content: "Oi" }],
++      { apiKey: "sk-test", model: "gpt-4.1-mini" },
++    );
++    await expect(iterator.next()).rejects.toMatchObject({ code: "PROVIDER_AUTH_FAILED" });
++    vi.restoreAllMocks();
++  });
++});
+diff --git a/src/lib/ai/providers/openai-compatible.ts b/src/lib/ai/providers/openai-compatible.ts
+new file mode 100644
+index 0000000..4fb775a
+--- /dev/null
++++ b/src/lib/ai/providers/openai-compatible.ts
+@@ -0,0 +1,80 @@
++import { AppError } from "@/lib/utils/errors";
++import { assertChatCredentials, iterateSseDataLines, mapProviderHttpError } from "./http";
++import type { AIChatMessage, AIChatOptions, AIChatStreamEvent, AIProvider } from "./types";
++
++function toOpenAiMessages(messages: readonly AIChatMessage[]) {
++  return messages.map((message) => ({
++    role: message.role,
++    content: message.content,
++  }));
++}
++
++export async function* streamOpenAiCompatibleChat(
++  endpoint: string,
++  messages: readonly AIChatMessage[],
++  options: AIChatOptions,
++): AsyncGenerator<AIChatStreamEvent, void, unknown> {
++  assertChatCredentials(options.apiKey, options.model);
++  if (options.signal?.aborted) {
++    throw new AppError("CHAT_FAILED", "O chat foi cancelado.");
++  }
++
++  let response: Response;
++  try {
++    response = await fetch(endpoint, {
++      method: "POST",
++      headers: {
++        Authorization: `Bearer ${options.apiKey}`,
++        "Content-Type": "application/json",
++      },
++      body: JSON.stringify({
++        model: options.model,
++        messages: toOpenAiMessages(messages),
++        stream: true,
++      }),
++      signal: options.signal,
++    });
++  } catch (error) {
++    if (options.signal?.aborted || (error instanceof Error && error.name === "AbortError")) {
++      throw new AppError("CHAT_FAILED", "O chat foi cancelado.");
++    }
++    throw new AppError("CHAT_FAILED", "Não foi possível contatar o provedor de chat.");
++  }
++
++  if (!response.ok) {
++    throw mapProviderHttpError(response.status, await response.text());
++  }
++  if (!response.body) {
++    throw new AppError("CHAT_FAILED", "Resposta de chat sem corpo.");
++  }
++
++  for await (const data of iterateSseDataLines(response.body, options.signal)) {
++    let payload: unknown;
++    try {
++      payload = JSON.parse(data);
++    } catch {
++      continue;
++    }
++    const delta = (payload as { choices?: Array<{ delta?: { content?: string | null } }> })
++      .choices?.[0]?.delta?.content;
++    if (typeof delta === "string" && delta.length > 0) {
++      yield { type: "delta", text: delta };
++    }
++  }
++  yield { type: "done" };
++}
++
++export function createOpenAiCompatibleProvider(
++  id: AIProvider["id"],
++  defaultEndpoint: string,
++): AIProvider {
++  return {
++    id,
++    streamChat(messages, options) {
++      const endpoint = options.baseUrl
++        ? `${options.baseUrl.replace(/\/$/, "")}/chat/completions`
++        : defaultEndpoint;
++      return streamOpenAiCompatibleChat(endpoint, messages, options);
++    },
++  };
++}
+diff --git a/src/lib/ai/providers/openai.ts b/src/lib/ai/providers/openai.ts
+new file mode 100644
+index 0000000..61877c2
+--- /dev/null
++++ b/src/lib/ai/providers/openai.ts
+@@ -0,0 +1,6 @@
++import { createOpenAiCompatibleProvider } from "./openai-compatible";
++
++export const openAiChatProvider = createOpenAiCompatibleProvider(
++  "openai",
++  "https://api.openai.com/v1/chat/completions",
++);
+diff --git a/src/lib/ai/suggested-actions.ts b/src/lib/ai/suggested-actions.ts
+new file mode 100644
+index 0000000..bd8ed1c
+--- /dev/null
++++ b/src/lib/ai/suggested-actions.ts
+@@ -0,0 +1,32 @@
++export const SUGGESTED_CHAT_ACTIONS = [
++  {
++    id: "summarize",
++    label: "Resumir vídeo",
++    prompt: "Create a structured summary of this video using the transcript.",
++  },
++  {
++    id: "explain",
++    label: "Explicar de forma simples",
++    prompt: "Explain the main ideas of this video in simple language using the transcript.",
++  },
++  {
++    id: "notes",
++    label: "Notas de estudo",
++    prompt: "Transform the transcript into concise study notes organized by topic.",
++  },
++  {
++    id: "topics",
++    label: "Tópicos principais",
++    prompt: "List the main topics covered in this video based on the transcript.",
++  },
++  {
++    id: "quiz",
++    label: "Criar quiz",
++    prompt: "Generate 10 questions about the video and provide the answers separately.",
++  },
++  {
++    id: "timestamps",
++    label: "Timestamps importantes",
++    prompt: "Identify the most important parts of the video and return their timestamps.",
++  },
++] as const;
+diff --git a/src/lib/ai/types.ts b/src/lib/ai/types.ts
+new file mode 100644
+index 0000000..66ef5ae
+--- /dev/null
++++ b/src/lib/ai/types.ts
+@@ -0,0 +1,29 @@
++import type { AIProviderId } from "@/types";
++
++export type AIChatRole = "system" | "user" | "assistant";
++
++export type AIChatMessage = {
++  role: AIChatRole;
++  content: string;
++};
++
++export type AIChatOptions = {
++  apiKey: string;
++  model: string;
++  baseUrl?: string;
++  signal?: AbortSignal;
++};
++
++export type AIChatStreamEvent =
++  | { type: "delta"; text: string }
++  | { type: "done" };
++
++export type AIProvider = {
++  id: AIProviderId;
++  streamChat(
++    messages: readonly AIChatMessage[],
++    options: AIChatOptions,
++  ): AsyncGenerator<AIChatStreamEvent, void, unknown>;
++};
++
++export const MAX_TRANSCRIPT_CONTEXT_CHARS = 80_000;
+diff --git a/src/lib/utils/errors.ts b/src/lib/utils/errors.ts
+index 4ab0ef6..65fcfae 100644
+--- a/src/lib/utils/errors.ts
++++ b/src/lib/utils/errors.ts
+@@ -15,7 +15,9 @@ export type ApiErrorCode =
+   | "TRANSCRIPTION_FAILED"
+   | "PROVIDER_AUTH_FAILED"
+   | "RATE_LIMITED"
+-  | "INVALID_PROVIDER";
++  | "INVALID_PROVIDER"
++  | "CONTEXT_TOO_LARGE"
++  | "CHAT_FAILED";
+ 
+ export class AppError extends Error {
+   constructor(
