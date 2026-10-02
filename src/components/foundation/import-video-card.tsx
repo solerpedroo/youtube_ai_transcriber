@@ -2,14 +2,16 @@
 /* eslint-disable @next/next/no-img-element -- yt-dlp thumbnail hosts are dynamic; the API returns only validated HTTPS URLs. */
 
 import { useState, type FormEvent } from "react";
+import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { ArrowRight, ExternalLink, Info, Link2, LoaderCircle, Sparkles, X } from "lucide-react";
 import type { Transcript, VideoMetadata } from "@/types";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { useProjectStore } from "@/stores/project-store";
+import { useYoutubeCookiesStore } from "@/stores/youtube-cookies-store";
 
-type ApiError = { message?: string };
+type ApiError = { code?: string; message?: string };
 
 type SubtitlesResponse = {
   videoId: string;
@@ -24,12 +26,19 @@ function formatDuration(seconds: number): string {
   return [hours, minutes, remaining].filter((value, index) => index > 0 || value > 0).map((value) => String(value).padStart(2, "0")).join(":");
 }
 
-async function fetchExistingSubtitles(videoUrl: string, videoId: string): Promise<Transcript | undefined> {
+async function fetchExistingSubtitles(
+  videoUrl: string,
+  videoId: string,
+  cookies?: string | null,
+): Promise<Transcript | undefined> {
   try {
     const response = await fetch("/api/youtube/subtitles", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ url: videoUrl }),
+      body: JSON.stringify({
+        url: videoUrl,
+        ...(cookies ? { cookies } : {}),
+      }),
     });
     if (!response.ok) return undefined;
     const body = await response.json() as SubtitlesResponse;
@@ -50,25 +59,35 @@ async function fetchExistingSubtitles(videoUrl: string, videoId: string): Promis
 export function ImportVideoCard() {
   const router = useRouter();
   const addProject = useProjectStore((state) => state.addProject);
+  const cookiesText = useYoutubeCookiesStore((state) => state.cookiesText);
   const [url, setUrl] = useState("");
   const [metadata, setMetadata] = useState<VideoMetadata | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [needsAuth, setNeedsAuth] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
   const [isCreating, setIsCreating] = useState(false);
 
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     setError(null);
+    setNeedsAuth(false);
     setMetadata(null);
     setIsLoading(true);
     try {
       const response = await fetch("/api/youtube/metadata", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ url }),
+        body: JSON.stringify({
+          url,
+          ...(cookiesText ? { cookies: cookiesText } : {}),
+        }),
       });
       const body = await response.json() as VideoMetadata | ApiError;
-      if (!response.ok) throw new Error("message" in body ? body.message : "Não foi possível carregar o vídeo.");
+      if (!response.ok) {
+        const code = "code" in body ? body.code : undefined;
+        if (code === "VIDEO_PRIVATE" || code === "AUTH_REQUIRED") setNeedsAuth(true);
+        throw new Error("message" in body && body.message ? body.message : "Não foi possível carregar o vídeo.");
+      }
       setMetadata(body as VideoMetadata);
     } catch (requestError) {
       setError(requestError instanceof Error ? requestError.message : "Não foi possível carregar o vídeo.");
@@ -84,7 +103,7 @@ export function ImportVideoCard() {
     try {
       const timestamp = new Date().toISOString();
       const id = crypto.randomUUID();
-      const transcript = await fetchExistingSubtitles(metadata.url, metadata.videoId);
+      const transcript = await fetchExistingSubtitles(metadata.url, metadata.videoId, cookiesText);
       addProject({
         id,
         metadata,
@@ -135,9 +154,16 @@ export function ImportVideoCard() {
           </div>
         </form>
         {error && (
-          <p className="mt-4 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700 dark:border-red-950 dark:bg-red-950/30 dark:text-red-300" role="alert">
-            {error}
-          </p>
+          <div className="mt-4 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700 dark:border-red-950 dark:bg-red-950/30 dark:text-red-300" role="alert">
+            <p>{error}</p>
+            {needsAuth && (
+              <p className="mt-2 text-red-600 dark:text-red-200">
+                Se você tem acesso legítimo, envie um cookies.txt em{" "}
+                <Link href="/settings" className="underline">Configurações → Acesso ao YouTube</Link>
+                {" "}e tente novamente.
+              </p>
+            )}
+          </div>
         )}
         {metadata && (
           <div className="mt-6 overflow-hidden rounded-xl border border-zinc-200 bg-zinc-50 dark:border-zinc-800 dark:bg-zinc-950">

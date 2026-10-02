@@ -1,5 +1,6 @@
 import { ChatSettingsForm } from "@/components/settings/chat-settings-form";
 import { TranscriptionSettingsForm } from "@/components/settings/transcription-settings-form";
+import { YoutubeAccessForm } from "@/components/settings/youtube-access-form";
 import { PhaseNotice } from "@/components/foundation/phase-notice";
 import { AppShell } from "@/components/layout/app-shell";
 import { Bot, KeyRound, Monitor, ShieldCheck, Video } from "lucide-react";
@@ -49,16 +50,17 @@ export default function SettingsPage() {
             </div>
           </section>
 
-          <section className="flex gap-4 border-b border-zinc-100 p-5 dark:border-zinc-800">
-            <span className="grid size-9 shrink-0 place-items-center rounded-lg bg-zinc-100 text-zinc-600 dark:bg-zinc-800 dark:text-zinc-300">
-              <Video className="size-4" />
-            </span>
-            <div>
-              <h2 className="font-medium">Acesso ao YouTube</h2>
-              <p className="mt-1 text-sm leading-6 text-zinc-600 dark:text-zinc-400">
-                Use cookies.txt apenas para vídeos aos quais você tem acesso.
-              </p>
-              <span className="mt-2 inline-block text-xs font-medium text-zinc-400">Em breve</span>
+          <section className="border-b border-zinc-100 p-5 dark:border-zinc-800">
+            <div className="flex gap-4">
+              <span className="grid size-9 shrink-0 place-items-center rounded-lg bg-zinc-100 text-zinc-600 dark:bg-zinc-800 dark:text-zinc-300">
+                <Video className="size-4" />
+              </span>
+              <div className="min-w-0 flex-1">
+                <h2 className="font-medium">Acesso ao YouTube</h2>
+                <div className="mt-4">
+                  <YoutubeAccessForm />
+                </div>
+              </div>
             </div>
           </section>
 
@@ -80,7 +82,7 @@ export default function SettingsPage() {
           <PhaseNotice>
             <span className="inline-flex items-center gap-2">
               <ShieldCheck className="size-4" />
-              As chaves de chat e transcrição ficam apenas neste navegador e não devem ser registradas em logs do servidor.
+              Chaves e cookies ficam só no navegador (cookies só nesta sessão). O servidor nunca persiste cookies.txt.
             </span>
           </PhaseNotice>
         </div>

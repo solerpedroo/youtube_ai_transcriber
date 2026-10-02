@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
 import { isAppError } from "@/lib/utils/errors";
+import { OptionalCookiesSchema } from "@/lib/youtube/cookies-schema";
 import { extractSubtitles } from "@/lib/youtube/subtitles";
 
 export const runtime = "nodejs";
@@ -13,10 +14,11 @@ const LanguageSchema = z.string().trim().regex(
 const RequestSchema = z.object({
   url: z.string().trim().min(1).max(2_048),
   language: LanguageSchema.optional(),
+  cookies: OptionalCookiesSchema,
 });
 
 function statusForCode(code: string): number {
-  if (code === "INVALID_URL" || code === "INVALID_LANGUAGE") return 400;
+  if (code === "INVALID_URL" || code === "INVALID_LANGUAGE" || code === "INVALID_COOKIES") return 400;
   if (code === "YTDLP_UNAVAILABLE" || code === "PROCESS_UNAVAILABLE") return 503;
   if (code === "VIDEO_NOT_FOUND" || code === "SUBTITLES_NOT_FOUND") return 404;
   if (code === "VIDEO_PRIVATE" || code === "AUTH_REQUIRED") return 403;
@@ -36,14 +38,21 @@ export async function POST(request: Request) {
     const body = RequestSchema.safeParse(payload);
     if (!body.success) {
       const hasLanguageError = body.error.issues.some((issue) => issue.path[0] === "language");
+      const hasCookiesError = body.error.issues.some((issue) => issue.path[0] === "cookies");
       const hasUrlError = body.error.issues.some((issue) => issue.path[0] === "url");
+      if (hasCookiesError) {
+        return NextResponse.json({
+          code: "INVALID_COOKIES",
+          message: "O arquivo de cookies é inválido ou excede o tamanho permitido.",
+        }, { status: 400 });
+      }
       if (hasLanguageError && !hasUrlError) {
         return NextResponse.json({ code: "INVALID_LANGUAGE", message: "Informe um código de idioma válido." }, { status: 400 });
       }
       return NextResponse.json({ code: "INVALID_URL", message: "Informe uma URL válida do YouTube." }, { status: 400 });
     }
 
-    return NextResponse.json(await extractSubtitles(body.data.url, body.data.language));
+    return NextResponse.json(await extractSubtitles(body.data.url, body.data.language, body.data.cookies));
   } catch (error) {
     if (isAppError(error)) {
       return NextResponse.json({ code: error.code, message: error.message }, { status: statusForCode(error.code) });

@@ -1,6 +1,7 @@
 import { z } from "zod";
 import type { VideoMetadata } from "@/types";
 import { AppError } from "@/lib/utils/errors";
+import { withCookiesArg, withTemporaryCookies } from "./cookies";
 import { runProcess } from "./process";
 import { YouTubeUrlSchema } from "./url";
 
@@ -46,28 +47,31 @@ function mapMetadataFailure(error: AppError): AppError {
   return error;
 }
 
-export async function getVideoMetadata(inputUrl: string): Promise<VideoMetadata> {
+export async function getVideoMetadata(inputUrl: string, cookiesText?: string): Promise<VideoMetadata> {
   const urlResult = YouTubeUrlSchema.safeParse(inputUrl);
   if (!urlResult.success) {
     throw new AppError("INVALID_URL", "Informe uma URL válida de vídeo do YouTube.");
   }
   const validated = urlResult.data;
-  let result;
-  try {
-    result = await runProcess(
-      "yt-dlp",
-      ["--dump-single-json", "--skip-download", "--no-playlist", validated.url],
-      { unavailableCode: "YTDLP_UNAVAILABLE" },
-    );
-  } catch (error) {
-    if (error instanceof AppError) throw mapMetadataFailure(error);
-    throw error;
-  }
 
-  try {
-    return normalizeVideoMetadata(JSON.parse(result.stdout), validated.url);
-  } catch (error) {
-    if (error instanceof AppError) throw error;
-    throw new AppError("METADATA_EXTRACTION_FAILED", "Não foi possível interpretar os dados do vídeo.");
-  }
+  return withTemporaryCookies(cookiesText, async (cookiesPath) => {
+    let result;
+    try {
+      result = await runProcess(
+        "yt-dlp",
+        withCookiesArg(["--dump-single-json", "--skip-download", "--no-playlist", validated.url], cookiesPath),
+        { unavailableCode: "YTDLP_UNAVAILABLE" },
+      );
+    } catch (error) {
+      if (error instanceof AppError) throw mapMetadataFailure(error);
+      throw error;
+    }
+
+    try {
+      return normalizeVideoMetadata(JSON.parse(result.stdout), validated.url);
+    } catch (error) {
+      if (error instanceof AppError) throw error;
+      throw new AppError("METADATA_EXTRACTION_FAILED", "Não foi possível interpretar os dados do vídeo.");
+    }
+  });
 }

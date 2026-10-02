@@ -1,6 +1,7 @@
 import { readdir } from "node:fs/promises";
 import { join } from "node:path";
 import { AppError } from "@/lib/utils/errors";
+import { withCookiesArg, writeCookiesFile } from "./cookies";
 import { runProcess } from "./process";
 import { YouTubeUrlSchema } from "./url";
 
@@ -44,23 +45,31 @@ async function findDownloadedAudio(jobDirectory: string): Promise<string> {
 }
 
 /** Downloads audio only into the job directory. Caller owns cleanup. */
-export async function extractAudio(inputUrl: string, jobDirectory: string): Promise<string> {
+export async function extractAudio(
+  inputUrl: string,
+  jobDirectory: string,
+  cookiesText?: string,
+): Promise<string> {
   const urlResult = YouTubeUrlSchema.safeParse(inputUrl);
   if (!urlResult.success) {
     throw new AppError("INVALID_URL", "Informe uma URL válida de vídeo do YouTube.");
   }
 
+  const cookiesPath = cookiesText?.trim()
+    ? await writeCookiesFile(jobDirectory, cookiesText)
+    : undefined;
+
   try {
     await runProcess(
       "yt-dlp",
-      [
+      withCookiesArg([
         "-f", "bestaudio/bestaudio*/best",
         "--no-playlist",
         "--no-warnings",
         "-o", "source.%(ext)s",
         "--paths", jobDirectory,
         urlResult.data.url,
-      ],
+      ], cookiesPath),
       {
         unavailableCode: "YTDLP_UNAVAILABLE",
         failureCode: "AUDIO_EXTRACTION_FAILED",
