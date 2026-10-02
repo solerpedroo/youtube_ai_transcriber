@@ -4,6 +4,7 @@ import { z } from "zod";
 import type { Transcript, TranscriptSegment } from "@/types";
 import { AppError } from "@/lib/utils/errors";
 import { buildFullText, normalizeSubtitleSegments } from "./normalize-segments";
+import { withCookiesArg, writeCookiesFile } from "./cookies";
 import { runProcess } from "./process";
 import type { SelectedSubtitle, SubtitleKind, SubtitleTrack } from "./subtitle-types";
 import { createJobDirectory, removeJobDirectory } from "./temp";
@@ -136,6 +137,7 @@ async function downloadSubtitleFile(
   url: string,
   selected: SelectedSubtitle,
   jobDirectory: string,
+  cookiesPath?: string,
 ): Promise<string> {
   if (!/^[A-Za-z0-9._-]+$/.test(selected.language)) {
     throw new AppError("SUBTITLE_EXTRACTION_FAILED", "O idioma de legenda retornado é inválido.");
@@ -144,7 +146,7 @@ async function downloadSubtitleFile(
   try {
     await runProcess(
       "yt-dlp",
-      [
+      withCookiesArg([
         "--skip-download",
         "--no-playlist",
         writeFlag,
@@ -154,7 +156,7 @@ async function downloadSubtitleFile(
         "-o", "subtitle.%(ext)s",
         "--paths", jobDirectory,
         url,
-      ],
+      ], cookiesPath),
       { unavailableCode: "YTDLP_UNAVAILABLE", timeoutMs: 120_000 },
     );
   } catch (error) {
@@ -164,7 +166,10 @@ async function downloadSubtitleFile(
   return readDownloadedVtt(jobDirectory);
 }
 
-export async function detectSubtitleTracks(inputUrl: string): Promise<{ videoId: string; available: SubtitleTrack[] }> {
+export async function detectSubtitleTracks(
+  inputUrl: string,
+  cookiesPath?: string,
+): Promise<{ videoId: string; available: SubtitleTrack[] }> {
   const urlResult = YouTubeUrlSchema.safeParse(inputUrl);
   if (!urlResult.success) {
     throw new AppError("INVALID_URL", "Informe uma URL válida de vídeo do YouTube.");
@@ -174,7 +179,10 @@ export async function detectSubtitleTracks(inputUrl: string): Promise<{ videoId:
   try {
     result = await runProcess(
       "yt-dlp",
-      ["--dump-single-json", "--skip-download", "--no-playlist", urlResult.data.url],
+      withCookiesArg(
+        ["--dump-single-json", "--skip-download", "--no-playlist", urlResult.data.url],
+        cookiesPath,
+      ),
       { unavailableCode: "YTDLP_UNAVAILABLE" },
     );
   } catch (error) {
@@ -193,26 +201,30 @@ export async function detectSubtitleTracks(inputUrl: string): Promise<{ videoId:
 export async function extractSubtitles(
   inputUrl: string,
   preferredLanguage?: string,
+  cookiesText?: string,
 ): Promise<SubtitlesResult> {
   const urlResult = YouTubeUrlSchema.safeParse(inputUrl);
   if (!urlResult.success) {
     throw new AppError("INVALID_URL", "Informe uma URL válida de vídeo do YouTube.");
   }
 
-  const detected = await detectSubtitleTracks(urlResult.data.url);
-  const selected = selectSubtitleTrack(detected.available, preferredLanguage);
-  if (!selected) {
-    return {
-      videoId: detected.videoId,
-      available: detected.available,
-      selected: null,
-      transcript: null,
-    };
-  }
-
   const jobDirectory = await createJobDirectory();
   try {
-    const vtt = await downloadSubtitleFile(urlResult.data.url, selected, jobDirectory);
+    const cookiesPath = cookiesText?.trim()
+      ? await writeCookiesFile(jobDirectory, cookiesText)
+      : undefined;
+    const detected = await detectSubtitleTracks(urlResult.data.url, cookiesPath);
+    const selected = selectSubtitleTrack(detected.available, preferredLanguage);
+    if (!selected) {
+      return {
+        videoId: detected.videoId,
+        available: detected.available,
+        selected: null,
+        transcript: null,
+      };
+    }
+
+    const vtt = await downloadSubtitleFile(urlResult.data.url, selected, jobDirectory, cookiesPath);
     const segments = normalizeSubtitleSegments(parseVtt(vtt));
     if (segments.length === 0) {
       throw new AppError("SUBTITLES_NOT_FOUND", "Nenhuma legenda utilizável foi encontrada para este vídeo.");
