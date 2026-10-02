@@ -1,0 +1,594 @@
+diff --git a/README.md b/README.md
+index 450246d..7509e6d 100644
+--- a/README.md
++++ b/README.md
+@@ -1,2 +1,18 @@
+ # youtube_ai_transcriber
+-Local-first web application where the user can paste a YouTube URL
++
++Aplicação local-first para importar vídeos do YouTube, transcrevê-los e estudá-los com IA.
++
++## Desenvolvimento
++
++```powershell
++npm install
++npm run dev
++```
++
++Para carregar metadata e, nas próximas fases, processar áudio, instale `yt-dlp` e `ffmpeg` no `PATH` da máquina que executa o Next.js. A aplicação não baixa nem persiste arquivos de vídeo ou áudio permanentemente.
++
++```powershell
++npm test
++npm run lint
++npm run build
++```
+diff --git a/docs/STATUS.md b/docs/STATUS.md
+index a527f78..7c980e3 100644
+--- a/docs/STATUS.md
++++ b/docs/STATUS.md
+@@ -1,8 +1,8 @@
+ # Status do projeto
+ 
+-- Wave: W01 — Foundation (Fase 1)
+-- State: complete
++- Wave: W02 — YouTube (Fase 2)
++- State: review
+ - Last completed: W01 — Foundation (Fase 1)
+-- Next action: W02 — implementar validação de URL, metadata e execução segura de yt-dlp/ffmpeg.
++- Next action: Implementar o validador de URL do YouTube.
+ - Last review: docs/reviews/W01/REVIEW.md
+ - Updated: 2026-10-02
+diff --git a/src/app/api/youtube/metadata/route.ts b/src/app/api/youtube/metadata/route.ts
+new file mode 100644
+index 0000000..284b8d2
+--- /dev/null
++++ b/src/app/api/youtube/metadata/route.ts
+@@ -0,0 +1,32 @@
++import { NextResponse } from "next/server";
++import { z } from "zod";
++import { isAppError } from "@/lib/utils/errors";
++import { getVideoMetadata } from "@/lib/youtube/metadata";
++
++export const runtime = "nodejs";
++
++const RequestSchema = z.object({ url: z.string().trim().min(1).max(2_048) });
++
++export async function POST(request: Request) {
++  let payload: unknown;
++  try {
++    payload = await request.json();
++  } catch {
++    return NextResponse.json({ code: "INVALID_URL", message: "Envie um corpo JSON válido." }, { status: 400 });
++  }
++
++  try {
++    const body = RequestSchema.safeParse(payload);
++    if (!body.success) {
++      return NextResponse.json({ code: "INVALID_URL", message: "Informe uma URL válida do YouTube." }, { status: 400 });
++    }
++
++    return NextResponse.json(await getVideoMetadata(body.data.url));
++  } catch (error) {
++    if (isAppError(error)) {
++      const status = error.code === "INVALID_URL" ? 400 : error.code === "YTDLP_UNAVAILABLE" || error.code === "PROCESS_UNAVAILABLE" ? 503 : error.code === "VIDEO_NOT_FOUND" ? 404 : error.code === "VIDEO_PRIVATE" || error.code === "AUTH_REQUIRED" ? 403 : 422;
++      return NextResponse.json({ code: error.code, message: error.message }, { status });
++    }
++    return NextResponse.json({ code: "METADATA_EXTRACTION_FAILED", message: "Não foi possível obter os dados do vídeo." }, { status: 500 });
++  }
++}
+diff --git a/src/components/foundation/import-video-card.tsx b/src/components/foundation/import-video-card.tsx
+index 2042690..2c1c221 100644
+--- a/src/components/foundation/import-video-card.tsx
++++ b/src/components/foundation/import-video-card.tsx
+@@ -1,38 +1,63 @@
+ "use client";
++/* eslint-disable @next/next/no-img-element -- yt-dlp thumbnail hosts are dynamic; the API returns only validated HTTPS URLs. */
+ 
+-import { ArrowRight, Info, Link2, Sparkles } from "lucide-react";
++import { useState, type FormEvent } from "react";
++import { useRouter } from "next/navigation";
++import { ArrowRight, ExternalLink, Info, Link2, LoaderCircle, Sparkles, X } from "lucide-react";
++import type { VideoMetadata } from "@/types";
+ import { Button } from "@/components/ui/button";
+ import { Input } from "@/components/ui/input";
++import { useProjectStore } from "@/stores/project-store";
++
++type ApiError = { message?: string };
++
++function formatDuration(seconds: number): string {
++  const hours = Math.floor(seconds / 3_600);
++  const minutes = Math.floor((seconds % 3_600) / 60);
++  const remaining = Math.floor(seconds % 60);
++  return [hours, minutes, remaining].filter((value, index) => index > 0 || value > 0).map((value) => String(value).padStart(2, "0")).join(":");
++}
+ 
+ export function ImportVideoCard() {
+-  return (
+-    <section className="relative overflow-hidden rounded-2xl border border-zinc-200 bg-white p-6 shadow-sm sm:p-10 dark:border-zinc-800 dark:bg-zinc-900">
+-      <div className="pointer-events-none absolute -right-20 -top-24 size-64 rounded-full bg-violet-200/50 blur-3xl dark:bg-violet-950/30" />
+-      <div className="relative mx-auto max-w-2xl">
+-        <div className="mb-6 flex size-11 items-center justify-center rounded-xl bg-violet-100 text-violet-700 dark:bg-violet-950/50 dark:text-violet-300">
+-          <Sparkles className="size-5" />
+-        </div>
+-        <p className="text-sm font-medium text-violet-700 dark:text-violet-300">Transcreva. Pesquise. Entenda.</p>
+-        <h1 className="mt-2 text-balance text-3xl font-semibold tracking-tight sm:text-4xl">Transforme vídeos do YouTube em conhecimento pesquisável.</h1>
+-        <p className="mt-4 max-w-xl text-pretty leading-7 text-zinc-600 dark:text-zinc-400">Cole o link de um vídeo para importar sua transcrição e conversar sobre o conteúdo com IA.</p>
++  const router = useRouter();
++  const addProject = useProjectStore((state) => state.addProject);
++  const [url, setUrl] = useState("");
++  const [metadata, setMetadata] = useState<VideoMetadata | null>(null);
++  const [error, setError] = useState<string | null>(null);
++  const [isLoading, setIsLoading] = useState(false);
++
++  async function handleSubmit(event: FormEvent<HTMLFormElement>) {
++    event.preventDefault();
++    setError(null); setMetadata(null); setIsLoading(true);
++    try {
++      const response = await fetch("/api/youtube/metadata", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ url }) });
++      const body = await response.json() as VideoMetadata | ApiError;
++      if (!response.ok) throw new Error("message" in body ? body.message : "Não foi possível carregar o vídeo.");
++      setMetadata(body as VideoMetadata);
++    } catch (requestError) {
++      setError(requestError instanceof Error ? requestError.message : "Não foi possível carregar o vídeo.");
++    } finally { setIsLoading(false); }
++  }
++
++  function createProject() {
++    if (!metadata) return;
++    const timestamp = new Date().toISOString();
++    const id = crypto.randomUUID();
++    addProject({ id, metadata, conversations: [], createdAt: timestamp, updatedAt: timestamp });
++    router.push(`/video/${id}`);
++  }
+ 
+-        <form className="mt-8" onSubmit={(event) => event.preventDefault()}>
+-          <label className="sr-only" htmlFor="youtube-url">URL do vídeo do YouTube</label>
+-          <div className="flex flex-col gap-3 sm:flex-row">
+-            <div className="flex h-12 flex-1 items-center gap-3 rounded-xl border border-zinc-300 bg-zinc-50 px-4 shadow-inner shadow-zinc-100 focus-within:border-violet-500 focus-within:ring-4 focus-within:ring-violet-500/10 dark:border-zinc-700 dark:bg-zinc-950 dark:shadow-none">
+-              <Link2 className="size-4 shrink-0 text-zinc-400" />
+-              <Input id="youtube-url" type="url" placeholder="Cole uma URL do YouTube" className="h-auto min-w-0 flex-1 border-0 bg-transparent px-0 shadow-none focus-visible:border-0 focus-visible:ring-0" />
+-            </div>
+-            <Button type="submit" size="lg" className="h-12 rounded-xl px-5">
+-              Importar vídeo <ArrowRight className="size-4" />
+-            </Button>
+-          </div>
+-        </form>
+-        <div className="mt-5 flex items-start gap-2 text-xs leading-5 text-zinc-500 dark:text-zinc-400">
+-          <Info className="mt-0.5 size-3.5 shrink-0" />
+-          <p>Na próxima fase, validaremos links e carregaremos os dados do vídeo. Vídeos públicos e não listados serão suportados.</p>
+-        </div>
+-      </div>
+-    </section>
+-  );
++  return <section className="relative overflow-hidden rounded-2xl border border-zinc-200 bg-white p-6 shadow-sm sm:p-10 dark:border-zinc-800 dark:bg-zinc-900">
++    <div className="pointer-events-none absolute -right-20 -top-24 size-64 rounded-full bg-violet-200/50 blur-3xl dark:bg-violet-950/30" />
++    <div className="relative mx-auto max-w-2xl">
++      <div className="mb-6 flex size-11 items-center justify-center rounded-xl bg-violet-100 text-violet-700 dark:bg-violet-950/50 dark:text-violet-300"><Sparkles className="size-5" /></div>
++      <p className="text-sm font-medium text-violet-700 dark:text-violet-300">Transcreva. Pesquise. Entenda.</p>
++      <h1 className="mt-2 text-balance text-3xl font-semibold tracking-tight sm:text-4xl">Transforme vídeos do YouTube em conhecimento pesquisável.</h1>
++      <p className="mt-4 max-w-xl text-pretty leading-7 text-zinc-600 dark:text-zinc-400">Cole o link de um vídeo para verificar suas informações antes de criar uma transcrição.</p>
++      <form className="mt-8" onSubmit={handleSubmit}><label className="sr-only" htmlFor="youtube-url">URL do vídeo do YouTube</label><div className="flex flex-col gap-3 sm:flex-row"><div className="flex h-12 flex-1 items-center gap-3 rounded-xl border border-zinc-300 bg-zinc-50 px-4 shadow-inner shadow-zinc-100 focus-within:border-violet-500 focus-within:ring-4 focus-within:ring-violet-500/10 dark:border-zinc-700 dark:bg-zinc-950 dark:shadow-none"><Link2 className="size-4 shrink-0 text-zinc-400" /><Input id="youtube-url" required value={url} onChange={(event) => setUrl(event.target.value)} type="url" placeholder="Cole uma URL do YouTube" className="h-auto min-w-0 flex-1 border-0 bg-transparent px-0 shadow-none focus-visible:border-0 focus-visible:ring-0" /></div><Button type="submit" size="lg" className="h-12 rounded-xl px-5" disabled={isLoading}>{isLoading ? <><LoaderCircle className="size-4 animate-spin" />Carregando</> : <>Importar vídeo <ArrowRight className="size-4" /></>}</Button></div></form>
++      {error && <p className="mt-4 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700 dark:border-red-950 dark:bg-red-950/30 dark:text-red-300" role="alert">{error}</p>}
++      {metadata && <div className="mt-6 overflow-hidden rounded-xl border border-zinc-200 bg-zinc-50 dark:border-zinc-800 dark:bg-zinc-950"><div className="flex flex-col gap-4 p-4 sm:flex-row">{metadata.thumbnail && <img src={metadata.thumbnail} alt="Miniatura do vídeo" className="aspect-video w-full rounded-lg object-cover sm:w-44" />}<div className="min-w-0 flex-1"><p className="text-xs font-medium uppercase tracking-wide text-zinc-500">Vídeo encontrado</p><h2 className="mt-1 truncate font-semibold">{metadata.title}</h2><p className="mt-1 text-sm text-zinc-600 dark:text-zinc-400">{metadata.channel ?? "Canal não informado"} · {formatDuration(metadata.duration)}</p><a className="mt-3 inline-flex items-center gap-1 text-xs text-violet-700 hover:underline dark:text-violet-300" href={metadata.url} target="_blank" rel="noreferrer">Abrir no YouTube <ExternalLink className="size-3" /></a></div></div><div className="flex justify-end gap-2 border-t border-zinc-200 p-3 dark:border-zinc-800"><Button type="button" variant="ghost" onClick={() => setMetadata(null)}><X className="size-4" />Cancelar</Button><Button type="button" onClick={createProject}>Criar projeto <ArrowRight className="size-4" /></Button></div></div>}
++      <div className="mt-5 flex items-start gap-2 text-xs leading-5 text-zinc-500 dark:text-zinc-400"><Info className="mt-0.5 size-3.5 shrink-0" /><p>Somente URLs públicas, não listadas e válidas do YouTube são aceitas nesta etapa. A transcrição será habilitada nas próximas fases.</p></div>
++    </div>
++  </section>;
+ }
+diff --git a/src/lib/utils/errors.ts b/src/lib/utils/errors.ts
+new file mode 100644
+index 0000000..1bc6396
+--- /dev/null
++++ b/src/lib/utils/errors.ts
+@@ -0,0 +1,24 @@
++export type ApiErrorCode =
++  | "INVALID_URL"
++  | "VIDEO_NOT_FOUND"
++  | "VIDEO_PRIVATE"
++  | "AUTH_REQUIRED"
++  | "YTDLP_UNAVAILABLE"
++  | "PROCESS_UNAVAILABLE"
++  | "METADATA_EXTRACTION_FAILED"
++  | "PROCESS_TIMEOUT";
++
++export class AppError extends Error {
++  constructor(
++    public readonly code: ApiErrorCode,
++    message: string,
++    public readonly details?: string,
++  ) {
++    super(message);
++    this.name = "AppError";
++  }
++}
++
++export function isAppError(error: unknown): error is AppError {
++  return error instanceof AppError;
++}
+diff --git a/src/lib/youtube/ffmpeg.ts b/src/lib/youtube/ffmpeg.ts
+new file mode 100644
+index 0000000..b43f748
+--- /dev/null
++++ b/src/lib/youtube/ffmpeg.ts
+@@ -0,0 +1,15 @@
++import { runProcess } from "./process";
++
++/** Internal wrapper for the Phase 4 audio workflow. Arguments are never browser-provided. */
++export async function normalizeAudio(inputPath: string, outputPath: string): Promise<void> {
++  await runProcess("ffmpeg", [
++    "-y",
++    "-i", inputPath,
++    "-ac", "1",
++    "-ar", "16000",
++    "-vn",
++    "-codec:a", "libmp3lame",
++    "-b:a", "64k",
++    outputPath,
++  ]);
++}
+diff --git a/src/lib/youtube/metadata.ts b/src/lib/youtube/metadata.ts
+new file mode 100644
+index 0000000..35fb832
+--- /dev/null
++++ b/src/lib/youtube/metadata.ts
+@@ -0,0 +1,73 @@
++import { z } from "zod";
++import type { VideoMetadata } from "@/types";
++import { AppError } from "@/lib/utils/errors";
++import { runProcess } from "./process";
++import { YouTubeUrlSchema } from "./url";
++
++const YtDlpMetadataSchema = z.object({
++  id: z.string().min(1),
++  title: z.string().min(1),
++  channel: z.string().min(1).optional(),
++  uploader: z.string().min(1).optional(),
++  duration: z.number().finite().nonnegative(),
++  thumbnail: z.string().url().refine((value) => new URL(value).protocol === "https:", "A miniatura deve usar HTTPS.").optional(),
++  webpage_url: z.string().url().optional(),
++});
++
++export function normalizeVideoMetadata(payload: unknown, fallbackUrl: string): VideoMetadata {
++  const parsed = YtDlpMetadataSchema.safeParse(payload);
++  if (!parsed.success) {
++    throw new AppError("METADATA_EXTRACTION_FAILED", "Os dados retornados pelo vídeo são inválidos.");
++  }
++  return {
++    videoId: parsed.data.id,
++    title: parsed.data.title,
++    channel: parsed.data.channel ?? parsed.data.uploader,
++    duration: parsed.data.duration,
++    thumbnail: parsed.data.thumbnail,
++    url: parsed.data.webpage_url && YouTubeUrlSchema.safeParse(parsed.data.webpage_url).success
++      ? YouTubeUrlSchema.parse(parsed.data.webpage_url).url
++      : fallbackUrl,
++  };
++}
++
++function mapMetadataFailure(error: AppError): AppError {
++  if (error.code !== "METADATA_EXTRACTION_FAILED" || !error.details) return error;
++  const details = error.details.toLowerCase();
++  if (details.includes("private video") || details.includes("members-only")) {
++    return new AppError("VIDEO_PRIVATE", "Este vídeo é privado ou exige acesso autorizado.");
++  }
++  if (details.includes("sign in") || details.includes("authentication")) {
++    return new AppError("AUTH_REQUIRED", "O YouTube exige autenticação para acessar este vídeo.");
++  }
++  if (details.includes("video unavailable") || details.includes("not available")) {
++    return new AppError("VIDEO_NOT_FOUND", "O vídeo não está disponível.");
++  }
++  return error;
++}
++
++export async function getVideoMetadata(inputUrl: string): Promise<VideoMetadata> {
++  const urlResult = YouTubeUrlSchema.safeParse(inputUrl);
++  if (!urlResult.success) {
++    throw new AppError("INVALID_URL", "Informe uma URL válida de vídeo do YouTube.");
++  }
++  const validated = urlResult.data;
++  let result;
++  try {
++    result = await runProcess(
++      "yt-dlp",
++      ["--dump-single-json", "--skip-download", "--no-playlist", validated.url],
++      { unavailableCode: "YTDLP_UNAVAILABLE" },
++    );
++  } catch (error) {
++    if (error instanceof AppError) throw mapMetadataFailure(error);
++    throw error;
++  }
++
++  try {
++    return normalizeVideoMetadata(JSON.parse(result.stdout), validated.url);
++  } catch (error) {
++    if (error instanceof AppError) throw error;
++    throw new AppError("METADATA_EXTRACTION_FAILED", "Não foi possível interpretar os dados do vídeo.");
++  }
++}
+diff --git a/src/lib/youtube/process.test.ts b/src/lib/youtube/process.test.ts
+new file mode 100644
+index 0000000..94b8f0d
+--- /dev/null
++++ b/src/lib/youtube/process.test.ts
+@@ -0,0 +1,12 @@
++import { describe, expect, it } from "vitest";
++import { runProcess } from "./process";
++
++describe("runProcess", () => {
++  it("captures output from an application-defined command", async () => {
++    await expect(runProcess(process.execPath, ["-e", "process.stdout.write('ok')"])).resolves.toMatchObject({ stdout: "ok", stderr: "", exitCode: 0 });
++  });
++
++  it("returns a controlled unavailable-process error", async () => {
++    await expect(runProcess("missing-command-for-youtube-ai", [])).rejects.toMatchObject({ code: "PROCESS_UNAVAILABLE" });
++  });
++});
+diff --git a/src/lib/youtube/process.ts b/src/lib/youtube/process.ts
+new file mode 100644
+index 0000000..4186ffe
+--- /dev/null
++++ b/src/lib/youtube/process.ts
+@@ -0,0 +1,77 @@
++import { spawn } from "node:child_process";
++import { AppError } from "@/lib/utils/errors";
++
++export type ProcessResult = {
++  stdout: string;
++  stderr: string;
++  exitCode: number;
++};
++
++export type RunProcessOptions = {
++  timeoutMs?: number;
++  maxOutputBytes?: number;
++  cwd?: string;
++  unavailableCode?: "YTDLP_UNAVAILABLE" | "PROCESS_UNAVAILABLE";
++};
++
++const DEFAULT_TIMEOUT_MS = 60_000;
++const DEFAULT_MAX_OUTPUT_BYTES = 5 * 1024 * 1024;
++
++/** Runs only application-defined commands. Never pass unvalidated input as an argument. */
++export function runProcess(
++  command: string,
++  args: readonly string[],
++  options: RunProcessOptions = {},
++): Promise<ProcessResult> {
++  if (!command || args.some((arg) => arg.includes("\0"))) {
++    return Promise.reject(new AppError("METADATA_EXTRACTION_FAILED", "Comando inválido."));
++  }
++
++  const timeoutMs = options.timeoutMs ?? DEFAULT_TIMEOUT_MS;
++  const maxOutputBytes = options.maxOutputBytes ?? DEFAULT_MAX_OUTPUT_BYTES;
++
++  return new Promise((resolve, reject) => {
++    const child = spawn(command, [...args], {
++      cwd: options.cwd,
++      shell: false,
++      stdio: ["ignore", "pipe", "pipe"],
++      windowsHide: true,
++    });
++    let stdout = "";
++    let stderr = "";
++    let outputBytes = 0;
++    let settled = false;
++
++    const settle = (callback: () => void) => {
++      if (settled) return;
++      settled = true;
++      clearTimeout(timer);
++      callback();
++    };
++    const append = (target: "stdout" | "stderr", chunk: Buffer) => {
++      outputBytes += chunk.byteLength;
++      if (outputBytes > maxOutputBytes) {
++        child.kill();
++        settle(() => reject(new AppError("METADATA_EXTRACTION_FAILED", "A saída do processo excedeu o limite permitido.")));
++        return;
++      }
++      if (target === "stdout") stdout += chunk.toString("utf8");
++      else stderr += chunk.toString("utf8");
++    };
++    const timer = setTimeout(() => {
++      child.kill();
++      settle(() => reject(new AppError("PROCESS_TIMEOUT", "O processamento demorou mais do que o esperado.")));
++    }, timeoutMs);
++
++    child.stdout.on("data", (chunk: Buffer) => append("stdout", chunk));
++    child.stderr.on("data", (chunk: Buffer) => append("stderr", chunk));
++    child.on("error", (error: NodeJS.ErrnoException) => settle(() => {
++      const code = error.code === "ENOENT" ? (options.unavailableCode ?? "PROCESS_UNAVAILABLE") : "METADATA_EXTRACTION_FAILED";
++      reject(new AppError(code, code === "YTDLP_UNAVAILABLE" ? "yt-dlp não está instalado no servidor." : "Não foi possível executar o processamento."));
++    }));
++    child.on("close", (exitCode) => settle(() => {
++      if (exitCode === 0) resolve({ stdout, stderr, exitCode });
++      else reject(new AppError("METADATA_EXTRACTION_FAILED", "Não foi possível obter os dados do vídeo.", stderr.slice(0, 2_000)));
++    }));
++  });
++}
+diff --git a/src/lib/youtube/temp.test.ts b/src/lib/youtube/temp.test.ts
+new file mode 100644
+index 0000000..cb4baa8
+--- /dev/null
++++ b/src/lib/youtube/temp.test.ts
+@@ -0,0 +1,18 @@
++import { access, writeFile } from "node:fs/promises";
++import { tmpdir } from "node:os";
++import { describe, expect, it } from "vitest";
++import { createJobDirectory, removeJobDirectory } from "./temp";
++
++describe("temporary job directories", () => {
++  it("creates and removes an isolated directory", async () => {
++    const directory = await createJobDirectory();
++    const filePath = `${directory}/metadata.json`;
++    await writeFile(filePath, "{}", "utf8");
++    await expect(removeJobDirectory(directory)).resolves.toBe(true);
++    await expect(access(filePath)).rejects.toThrow();
++  });
++
++  it("refuses to delete a path outside its temporary namespace", async () => {
++    await expect(removeJobDirectory(tmpdir())).resolves.toBe(false);
++  });
++});
+diff --git a/src/lib/youtube/temp.ts b/src/lib/youtube/temp.ts
+new file mode 100644
+index 0000000..7dc8f0e
+--- /dev/null
++++ b/src/lib/youtube/temp.ts
+@@ -0,0 +1,26 @@
++import { mkdtemp, rm } from "node:fs/promises";
++import { tmpdir } from "node:os";
++import { join, resolve, sep } from "node:path";
++
++const TEMP_PREFIX = "youtube-ai-";
++
++export async function createJobDirectory(): Promise<string> {
++  return mkdtemp(join(tmpdir(), TEMP_PREFIX));
++}
++
++/** Safe for finally blocks: refuses unsafe paths and reports cleanup failure without throwing. */
++export async function removeJobDirectory(jobDirectory: string): Promise<boolean> {
++  const expectedPrefix = `${resolve(tmpdir())}${sep}${TEMP_PREFIX}`;
++  const resolvedDirectory = resolve(jobDirectory);
++  const comparableDirectory = process.platform === "win32" ? resolvedDirectory.toLowerCase() : resolvedDirectory;
++  const comparablePrefix = process.platform === "win32" ? expectedPrefix.toLowerCase() : expectedPrefix;
++  if (!comparableDirectory.startsWith(comparablePrefix)) {
++    return false;
++  }
++  try {
++    await rm(resolvedDirectory, { recursive: true, force: true });
++    return true;
++  } catch {
++    return false;
++  }
++}
+diff --git a/src/lib/youtube/url.test.ts b/src/lib/youtube/url.test.ts
+new file mode 100644
+index 0000000..5dcd521
+--- /dev/null
++++ b/src/lib/youtube/url.test.ts
+@@ -0,0 +1,54 @@
++import { describe, expect, it } from "vitest";
++import { normalizeVideoMetadata } from "./metadata";
++import { YouTubeUrlSchema } from "./url";
++
++describe("YouTubeUrlSchema", () => {
++  it.each([
++    "https://www.youtube.com/watch?v=dQw4w9WgXcQ",
++    "https://youtu.be/dQw4w9WgXcQ?t=10",
++    "https://youtube.com/shorts/dQw4w9WgXcQ",
++    "https://music.youtube.com/watch?v=dQw4w9WgXcQ",
++  ])("accepts supported video URLs", (url) => {
++    expect(YouTubeUrlSchema.safeParse(url).success).toBe(true);
++  });
++
++  it.each([
++    "http://youtube.com/watch?v=dQw4w9WgXcQ",
++    "https://youtube.com.evil.test/watch?v=dQw4w9WgXcQ",
++    "https://attacker@youtube.com/watch?v=dQw4w9WgXcQ",
++    "https://youtube.com:444/watch?v=dQw4w9WgXcQ",
++    "https://example.com/watch?v=dQw4w9WgXcQ",
++    "https://youtube.com/watch?v=short",
++    "https://youtube.com/playlist?list=abc",
++  ])("rejects unsupported or unsafe URLs", (url) => {
++    expect(YouTubeUrlSchema.safeParse(url).success).toBe(false);
++  });
++});
++
++describe("normalizeVideoMetadata", () => {
++  it("maps only the DTO required by the browser", () => {
++    expect(normalizeVideoMetadata({
++      id: "dQw4w9WgXcQ",
++      title: "A video",
++      uploader: "Channel",
++      duration: 212,
++      thumbnail: "https://i.ytimg.com/vi/dQw4w9WgXcQ/hqdefault.jpg",
++      webpage_url: "https://www.youtube.com/watch?v=dQw4w9WgXcQ",
++      privateToken: "must not leak",
++    }, "https://www.youtube.com/watch?v=dQw4w9WgXcQ")).toEqual({
++      videoId: "dQw4w9WgXcQ",
++      title: "A video",
++      channel: "Channel",
++      duration: 212,
++      thumbnail: "https://i.ytimg.com/vi/dQw4w9WgXcQ/hqdefault.jpg",
++      url: "https://www.youtube.com/watch?v=dQw4w9WgXcQ",
++    });
++  });
++
++  it("does not expose a canonical URL outside the YouTube allowlist", () => {
++    expect(normalizeVideoMetadata({
++      id: "dQw4w9WgXcQ", title: "A video", duration: 212,
++      webpage_url: "https://example.com/redirect",
++    }, "https://www.youtube.com/watch?v=dQw4w9WgXcQ").url).toBe("https://www.youtube.com/watch?v=dQw4w9WgXcQ");
++  });
++});
+diff --git a/src/lib/youtube/url.ts b/src/lib/youtube/url.ts
+new file mode 100644
+index 0000000..c9e8bad
+--- /dev/null
++++ b/src/lib/youtube/url.ts
+@@ -0,0 +1,65 @@
++import { z } from "zod";
++
++const YOUTUBE_HOSTS = new Set([
++  "youtube.com",
++  "www.youtube.com",
++  "m.youtube.com",
++  "music.youtube.com",
++  "youtu.be",
++]);
++
++const YOUTUBE_ID_PATTERN = /^[A-Za-z0-9_-]{6,}$/;
++
++export type ValidatedYouTubeUrl = {
++  url: string;
++  videoId: string;
++};
++
++function parseYouTubeUrl(value: string): ValidatedYouTubeUrl | null {
++  let url: URL;
++  try {
++    url = new URL(value);
++  } catch {
++    return null;
++  }
++
++  if (
++    url.protocol !== "https:"
++    || url.username
++    || url.password
++    || url.port
++    || !YOUTUBE_HOSTS.has(url.hostname.toLowerCase())
++  ) {
++    return null;
++  }
++
++  const host = url.hostname.toLowerCase();
++  const pathParts = url.pathname.split("/").filter(Boolean);
++  const videoId = host === "youtu.be"
++    ? pathParts[0]
++    : url.pathname === "/watch"
++      ? url.searchParams.get("v") ?? undefined
++      : ["shorts", "live", "embed"].includes(pathParts[0] ?? "")
++        ? pathParts[1]
++        : undefined;
++
++  if (!videoId || !YOUTUBE_ID_PATTERN.test(videoId)) return null;
++
++  return { url: url.toString(), videoId };
++}
++
++export const YouTubeUrlSchema = z.string().trim().min(1).transform((value, context) => {
++  const parsed = parseYouTubeUrl(value);
++  if (!parsed) {
++    context.addIssue({
++      code: "custom",
++      message: "Informe uma URL válida de vídeo do YouTube.",
++    });
++    return z.NEVER;
++  }
++  return parsed;
++});
++
++export function validateYouTubeUrl(value: string): ValidatedYouTubeUrl {
++  return YouTubeUrlSchema.parse(value);
++}
