@@ -84,8 +84,8 @@ export function VideoWorkspace({ projectId }: { projectId: string }) {
   );
 
   function seekTo(seconds: number) {
-    playerRef.current?.seekTo(seconds);
-    setCurrentTime(seconds);
+    const seeked = playerRef.current?.seekTo(seconds) ?? false;
+    if (seeked) setCurrentTime(seconds);
     setTab("video");
   }
 
@@ -185,11 +185,20 @@ export function VideoWorkspace({ projectId }: { projectId: string }) {
         statusLabel={project.transcript ? "Transcrição disponível" : "Sem transcrição"}
       />
 
-      <div className="mb-4 flex gap-1 rounded-xl bg-zinc-100 p-1 dark:bg-zinc-900 lg:hidden">
+      <div
+        className="mb-4 flex gap-1 rounded-xl bg-zinc-100 p-1 dark:bg-zinc-900 lg:hidden"
+        role="tablist"
+        aria-label="Seções do espaço de trabalho"
+      >
         {tabs.map((item) => (
           <button
             key={item.id}
             type="button"
+            role="tab"
+            id={`workspace-tab-${item.id}`}
+            aria-selected={tab === item.id}
+            aria-controls={`workspace-panel-${item.id}`}
+            tabIndex={tab === item.id ? 0 : -1}
             onClick={() => setTab(item.id)}
             className={`flex-1 rounded-lg px-3 py-2 text-sm font-medium transition ${
               tab === item.id
@@ -204,7 +213,12 @@ export function VideoWorkspace({ projectId }: { projectId: string }) {
 
       <div className="grid gap-6 lg:grid-cols-[minmax(0,1.85fr)_minmax(20rem,1fr)]">
         <section className={`overflow-hidden rounded-2xl border border-zinc-200 bg-white shadow-sm dark:border-zinc-800 dark:bg-zinc-900 ${tab === "chat" ? "hidden lg:block" : ""}`}>
-          <div className={tab === "transcript" ? "hidden lg:block" : ""}>
+          <div
+            id="workspace-panel-video"
+            role="tabpanel"
+            aria-labelledby="workspace-tab-video"
+            className={tab === "transcript" ? "hidden lg:block" : ""}
+          >
             <YoutubePlayer
               ref={playerRef}
               videoId={project.metadata.videoId}
@@ -213,7 +227,12 @@ export function VideoWorkspace({ projectId }: { projectId: string }) {
             />
           </div>
 
-          <div className={`p-5 ${tab === "video" ? "hidden lg:block" : ""}`}>
+          <div
+            id="workspace-panel-transcript"
+            role="tabpanel"
+            aria-labelledby="workspace-tab-transcript"
+            className={`p-5 ${tab === "video" ? "hidden lg:block" : ""}`}
+          >
             <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
               <h2 className="font-semibold">Transcrição</h2>
               <Button type="button" size="sm" disabled={isTranscribing} onClick={() => void startTranscription()}>
