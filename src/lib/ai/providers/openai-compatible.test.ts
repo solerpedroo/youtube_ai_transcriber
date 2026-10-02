@@ -1,6 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import { streamOpenAiCompatibleChat } from "./providers/openai-compatible";
-
+import { streamOpenAiCompatibleChat } from "./openai-compatible";
 function sseResponse(lines: string[], status = 200): Response {
   return new Response(lines.join("\n"), {
     status,
