@@ -1,8 +1,8 @@
 # Status do projeto
 
-- Wave: W04 — Transcription (Fase 4)
+- Wave: W05 — Workspace (Fase 5)
 - State: complete
-- Last completed: W04 — Transcription (Fase 4)
-- Next action: W05 — implementar workspace com player, busca e ações da transcrição.
-- Last review: docs/reviews/W04/REVIEW.md
+- Last completed: W05 — Workspace (Fase 5)
+- Next action: W06 — implementar chat com provedores de IA e streaming.
+- Last review: docs/reviews/W05/REVIEW.md
 - Updated: 2026-10-02

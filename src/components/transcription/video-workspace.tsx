@@ -1,35 +1,25 @@
 "use client";
 
-import Link from "next/link";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import {
-  ArrowLeft,
   LoaderCircle,
   MessageSquareText,
-  Search,
   Subtitles,
-  Video,
   WandSparkles,
 } from "lucide-react";
 import type { Transcript, VideoProject } from "@/types";
 import type { TranscriptionProgressEvent } from "@/lib/transcription/types";
 import { PhaseNotice } from "@/components/foundation/phase-notice";
 import { AppShell } from "@/components/layout/app-shell";
+import { TranscriptView } from "@/components/transcript/transcript-view";
 import { Button } from "@/components/ui/button";
+import { VideoHeader } from "@/components/video/video-header";
+import { YoutubePlayer, type YoutubePlayerHandle } from "@/components/video/youtube-player";
 import { useProjectStore } from "@/stores/project-store";
 import { useSettingsStore } from "@/stores/settings-store";
 
-function formatTimestamp(seconds: number): string {
-  const total = Math.max(0, Math.floor(seconds));
-  const hours = Math.floor(total / 3_600);
-  const minutes = Math.floor((total % 3_600) / 60);
-  const remaining = total % 60;
-  if (hours > 0) {
-    return `${hours}:${String(minutes).padStart(2, "0")}:${String(remaining).padStart(2, "0")}`;
-  }
-  return `${minutes}:${String(remaining).padStart(2, "0")}`;
-}
+type WorkspaceTab = "video" | "transcript" | "chat";
 
 async function consumeTranscriptionStream(
   response: Response,
@@ -62,6 +52,7 @@ async function consumeTranscriptionStream(
 
 export function VideoWorkspace({ projectId }: { projectId: string }) {
   const router = useRouter();
+  const playerRef = useRef<YoutubePlayerHandle | null>(null);
   const hasHydratedProjects = useProjectStore((state) => state.hasHydrated);
   const hydrateProjects = useProjectStore((state) => state.hydrate);
   const projects = useProjectStore((state) => state.projects);
@@ -74,6 +65,8 @@ export function VideoWorkspace({ projectId }: { projectId: string }) {
   const [progress, setProgress] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [isTranscribing, setIsTranscribing] = useState(false);
+  const [currentTime, setCurrentTime] = useState(0);
+  const [tab, setTab] = useState<WorkspaceTab>("video");
   const abortRef = useRef<AbortController | null>(null);
 
   useEffect(() => {
@@ -89,6 +82,12 @@ export function VideoWorkspace({ projectId }: { projectId: string }) {
     () => projects.find((item) => item.id === projectId) as VideoProject | undefined,
     [projectId, projects],
   );
+
+  function seekTo(seconds: number) {
+    const seeked = playerRef.current?.seekTo(seconds) ?? false;
+    if (seeked) setCurrentTime(seconds);
+    setTab("video");
+  }
 
   async function startTranscription() {
     if (!project || isTranscribing) return;
@@ -137,6 +136,7 @@ export function VideoWorkspace({ projectId }: { projectId: string }) {
       };
       setTranscript(project.id, transcript);
       setProgress("Transcrição concluída.");
+      setTab("transcript");
     } catch (requestError) {
       if (abortController.signal.aborted) {
         setProgress(null);
@@ -172,38 +172,69 @@ export function VideoWorkspace({ projectId }: { projectId: string }) {
     );
   }
 
+  const tabs: Array<{ id: WorkspaceTab; label: string }> = [
+    { id: "video", label: "Vídeo" },
+    { id: "transcript", label: "Transcrição" },
+    { id: "chat", label: "Chat" },
+  ];
+
   return (
     <AppShell compact>
-      <div className="mb-6">
-        <Link href="/library" className="inline-flex items-center gap-2 text-sm text-zinc-600 hover:text-zinc-950 dark:text-zinc-400 dark:hover:text-white">
-          <ArrowLeft className="size-4" />Biblioteca
-        </Link>
-        <div className="mt-4 flex flex-wrap items-end justify-between gap-3">
-          <div>
-            <p className="text-xs font-medium uppercase tracking-wider text-zinc-500">Espaço de trabalho</p>
-            <h1 className="mt-1 text-2xl font-semibold tracking-tight">{project.metadata.title}</h1>
-            <p className="mt-1 text-sm text-zinc-500">{project.metadata.channel ?? "Canal não informado"}</p>
-          </div>
-          <span className="rounded-full bg-violet-100 px-3 py-1 text-xs font-medium text-violet-800 dark:bg-violet-950/50 dark:text-violet-300">
-            {project.transcript ? "Transcrição disponível" : "Sem transcrição"}
-          </span>
-        </div>
+      <VideoHeader
+        metadata={project.metadata}
+        statusLabel={project.transcript ? "Transcrição disponível" : "Sem transcrição"}
+      />
+
+      <div
+        className="mb-4 flex gap-1 rounded-xl bg-zinc-100 p-1 dark:bg-zinc-900 lg:hidden"
+        role="tablist"
+        aria-label="Seções do espaço de trabalho"
+      >
+        {tabs.map((item) => (
+          <button
+            key={item.id}
+            type="button"
+            role="tab"
+            id={`workspace-tab-${item.id}`}
+            aria-selected={tab === item.id}
+            aria-controls={`workspace-panel-${item.id}`}
+            tabIndex={tab === item.id ? 0 : -1}
+            onClick={() => setTab(item.id)}
+            className={`flex-1 rounded-lg px-3 py-2 text-sm font-medium transition ${
+              tab === item.id
+                ? "bg-white text-zinc-950 shadow-sm dark:bg-zinc-800 dark:text-white"
+                : "text-zinc-500"
+            }`}
+          >
+            {item.label}
+          </button>
+        ))}
       </div>
 
       <div className="grid gap-6 lg:grid-cols-[minmax(0,1.85fr)_minmax(20rem,1fr)]">
-        <section className="overflow-hidden rounded-2xl border border-zinc-200 bg-white shadow-sm dark:border-zinc-800 dark:bg-zinc-900">
-          <div className="grid aspect-video place-items-center bg-zinc-950 text-center text-zinc-400">
-            <div>
-              <Video className="mx-auto size-8 text-zinc-600" />
-              <p className="mt-3 text-sm">O player do YouTube chega na Fase 5.</p>
-            </div>
+        <section className={`overflow-hidden rounded-2xl border border-zinc-200 bg-white shadow-sm dark:border-zinc-800 dark:bg-zinc-900 ${tab === "chat" ? "hidden lg:block" : ""}`}>
+          <div
+            id="workspace-panel-video"
+            role="tabpanel"
+            aria-labelledby="workspace-tab-video"
+            className={tab === "transcript" ? "hidden lg:block" : ""}
+          >
+            <YoutubePlayer
+              ref={playerRef}
+              videoId={project.metadata.videoId}
+              onTimeUpdate={setCurrentTime}
+              className="overflow-hidden"
+            />
           </div>
-          <div className="p-5">
-            <div className="flex flex-wrap items-center justify-between gap-3">
-              <div className="flex items-center gap-2">
-                <h2 className="font-semibold">Transcrição</h2>
-                <Search className="size-4 text-zinc-400" />
-              </div>
+
+          <div
+            id="workspace-panel-transcript"
+            role="tabpanel"
+            aria-labelledby="workspace-tab-transcript"
+            className={`p-5 ${tab === "video" ? "hidden lg:block" : ""}`}
+          >
+            <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
+              <h2 className="font-semibold">Transcrição</h2>
               <Button type="button" size="sm" disabled={isTranscribing} onClick={() => void startTranscription()}>
                 {isTranscribing
                   ? <><LoaderCircle className="size-4 animate-spin" />Transcrevendo</>
@@ -212,32 +243,32 @@ export function VideoWorkspace({ projectId }: { projectId: string }) {
             </div>
 
             {progress && (
-              <p className="mt-3 text-sm text-violet-700 dark:text-violet-300" aria-live="polite">{progress}</p>
+              <p className="mb-3 text-sm text-violet-700 dark:text-violet-300" aria-live="polite">{progress}</p>
             )}
             {error && (
-              <p className="mt-3 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700 dark:border-red-950 dark:bg-red-950/30 dark:text-red-300" role="alert">
+              <p className="mb-3 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700 dark:border-red-950 dark:bg-red-950/30 dark:text-red-300" role="alert">
                 {error}
               </p>
             )}
 
             {project.transcript ? (
-              <div className="mt-4 max-h-[28rem] space-y-3 overflow-y-auto pr-1">
-                {project.transcript.segments.map((segment) => (
-                  <div key={segment.id} className="grid grid-cols-[4.5rem_minmax(0,1fr)] gap-3 text-sm">
-                    <span className="font-mono text-xs text-zinc-500">{formatTimestamp(segment.start)}</span>
-                    <p className="leading-6 text-zinc-700 dark:text-zinc-300">{segment.text}</p>
-                  </div>
-                ))}
+              <div className="h-[28rem]">
+                <TranscriptView
+                  metadata={project.metadata}
+                  transcript={project.transcript}
+                  currentTime={currentTime}
+                  onSeek={seekTo}
+                />
               </div>
             ) : (
-              <div className="mt-4 rounded-xl border border-dashed border-zinc-300 p-5 text-sm leading-6 text-zinc-500 dark:border-zinc-700">
-                Nenhuma transcrição ainda. Se o vídeo tiver legendas, elas podem ter sido importadas na criação do projeto; caso contrário, use a transcrição por IA.
+              <div className="rounded-xl border border-dashed border-zinc-300 p-5 text-sm leading-6 text-zinc-500 dark:border-zinc-700">
+                Nenhuma transcrição ainda. Importe legendas na criação do projeto ou gere uma transcrição por IA.
               </div>
             )}
           </div>
         </section>
 
-        <aside className="rounded-2xl border border-zinc-200 bg-white p-5 shadow-sm dark:border-zinc-800 dark:bg-zinc-900">
+        <aside className={`rounded-2xl border border-zinc-200 bg-white p-5 shadow-sm dark:border-zinc-800 dark:bg-zinc-900 ${tab === "chat" ? "block" : "hidden lg:block"}`}>
           <div className="flex items-center gap-2">
             <MessageSquareText className="size-4 text-violet-600 dark:text-violet-400" />
             <h2 className="font-semibold">Assistente de IA</h2>
@@ -248,7 +279,7 @@ export function VideoWorkspace({ projectId }: { projectId: string }) {
             </span>
             <p className="mt-4 text-sm font-medium">Pergunte qualquer coisa sobre este vídeo.</p>
             <p className="mt-2 text-sm leading-6 text-zinc-500">
-              O chat será liberado na Fase 6, após a transcrição e um provedor de chat.
+              O chat será liberado na Fase 6, após um provedor de chat configurado.
             </p>
           </div>
         </aside>
@@ -256,7 +287,7 @@ export function VideoWorkspace({ projectId }: { projectId: string }) {
 
       <div className="mt-6">
         <PhaseNotice>
-          Fase 4 habilita a pipeline de transcrição. Player, busca avançada e chat chegam nas próximas fases.
+          Fase 5: player, seek por timestamp, busca, cópia e exportações. O chat chega na Fase 6.
         </PhaseNotice>
       </div>
     </AppShell>
