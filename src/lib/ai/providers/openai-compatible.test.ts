@@ -37,6 +37,30 @@ describe("streamOpenAiCompatibleChat", () => {
     vi.restoreAllMocks();
   });
 
+  it("flushes a final SSE data line without trailing newline", async () => {
+    vi.spyOn(globalThis, "fetch").mockResolvedValue(
+      new Response('data: {"choices":[{"delta":{"content":"fim"}}]}', {
+        status: 200,
+        headers: { "Content-Type": "text/event-stream" },
+      }),
+    );
+
+    const events = [];
+    for await (const event of streamOpenAiCompatibleChat(
+      "https://api.openai.com/v1/chat/completions",
+      [{ role: "user", content: "Oi" }],
+      { apiKey: "sk-test", model: "gpt-4.1-mini" },
+    )) {
+      events.push(event);
+    }
+
+    expect(events).toEqual([
+      { type: "delta", text: "fim" },
+      { type: "done" },
+    ]);
+    vi.restoreAllMocks();
+  });
+
   it("maps unauthorized responses", async () => {
     vi.spyOn(globalThis, "fetch").mockResolvedValue(new Response("nope", { status: 401 }));
     const iterator = streamOpenAiCompatibleChat(
