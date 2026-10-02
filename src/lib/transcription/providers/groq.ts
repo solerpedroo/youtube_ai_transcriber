@@ -5,7 +5,7 @@ const GROQ_TRANSCRIPTIONS_URL = "https://api.groq.com/openai/v1/audio/transcript
 
 export const groqTranscriptionProvider: TranscriptionProvider = {
   id: "groq",
-  transcribe(filePath, options) {
-    return transcribeWithOpenAiCompatibleApi(GROQ_TRANSCRIPTIONS_URL, filePath, options);
+  transcribe(filePath, options, signal) {
+    return transcribeWithOpenAiCompatibleApi(GROQ_TRANSCRIPTIONS_URL, filePath, options, signal);
   },
 };
