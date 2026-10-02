@@ -25,7 +25,9 @@ export function normalizeVideoMetadata(payload: unknown, fallbackUrl: string): V
     channel: parsed.data.channel ?? parsed.data.uploader,
     duration: parsed.data.duration,
     thumbnail: parsed.data.thumbnail,
-    url: parsed.data.webpage_url ?? fallbackUrl,
+    url: parsed.data.webpage_url && YouTubeUrlSchema.safeParse(parsed.data.webpage_url).success
+      ? YouTubeUrlSchema.parse(parsed.data.webpage_url).url
+      : fallbackUrl,
   };
 }
 
