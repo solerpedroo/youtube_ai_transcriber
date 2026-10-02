@@ -37,7 +37,12 @@ export async function transcribeWithOpenAiCompatibleApi(
   endpoint: string,
   filePath: string,
   options: TranscriptionOptions,
+  signal?: AbortSignal,
 ): Promise<TranscriptionResult> {
+  if (signal?.aborted) {
+    throw new AppError("TRANSCRIPTION_FAILED", "A transcrição foi cancelada.");
+  }
+
   const bytes = await readFile(filePath);
   const form = new FormData();
   form.append(
@@ -58,8 +63,12 @@ export async function transcribeWithOpenAiCompatibleApi(
         Authorization: `Bearer ${options.apiKey}`,
       },
       body: form,
+      signal,
     });
-  } catch {
+  } catch (error) {
+    if (signal?.aborted || (error instanceof Error && error.name === "AbortError")) {
+      throw new AppError("TRANSCRIPTION_FAILED", "A transcrição foi cancelada.");
+    }
     throw new AppError("TRANSCRIPTION_FAILED", "Não foi possível contatar o provedor de transcrição.");
   }
 
