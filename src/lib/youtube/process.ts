@@ -1,5 +1,5 @@
 import { spawn } from "node:child_process";
-import { AppError } from "@/lib/utils/errors";
+import { AppError, type ApiErrorCode } from "@/lib/utils/errors";
 
 export type ProcessResult = {
   stdout: string;
@@ -11,11 +11,19 @@ export type RunProcessOptions = {
   timeoutMs?: number;
   maxOutputBytes?: number;
   cwd?: string;
-  unavailableCode?: "YTDLP_UNAVAILABLE" | "PROCESS_UNAVAILABLE";
+  unavailableCode?: "YTDLP_UNAVAILABLE" | "PROCESS_UNAVAILABLE" | "FFMPEG_UNAVAILABLE";
+  failureCode?: ApiErrorCode;
+  failureMessage?: string;
 };
 
 const DEFAULT_TIMEOUT_MS = 60_000;
 const DEFAULT_MAX_OUTPUT_BYTES = 5 * 1024 * 1024;
+
+function unavailableMessage(code: NonNullable<RunProcessOptions["unavailableCode"]>): string {
+  if (code === "YTDLP_UNAVAILABLE") return "yt-dlp não está instalado no servidor.";
+  if (code === "FFMPEG_UNAVAILABLE") return "ffmpeg não está instalado no servidor.";
+  return "Não foi possível executar o processamento.";
+}
 
 /** Runs only application-defined commands. Never pass unvalidated input as an argument. */
 export function runProcess(
@@ -23,8 +31,11 @@ export function runProcess(
   args: readonly string[],
   options: RunProcessOptions = {},
 ): Promise<ProcessResult> {
+  const failureCode = options.failureCode ?? "METADATA_EXTRACTION_FAILED";
+  const failureMessage = options.failureMessage ?? "Não foi possível obter os dados do vídeo.";
+
   if (!command || args.some((arg) => arg.includes("\0"))) {
-    return Promise.reject(new AppError("METADATA_EXTRACTION_FAILED", "Comando inválido."));
+    return Promise.reject(new AppError(failureCode, "Comando inválido."));
   }
 
   const timeoutMs = options.timeoutMs ?? DEFAULT_TIMEOUT_MS;
@@ -52,7 +63,7 @@ export function runProcess(
       outputBytes += chunk.byteLength;
       if (outputBytes > maxOutputBytes) {
         child.kill();
-        settle(() => reject(new AppError("METADATA_EXTRACTION_FAILED", "A saída do processo excedeu o limite permitido.")));
+        settle(() => reject(new AppError(failureCode, "A saída do processo excedeu o limite permitido.")));
         return;
       }
       if (target === "stdout") stdout += chunk.toString("utf8");
@@ -66,12 +77,12 @@ export function runProcess(
     child.stdout.on("data", (chunk: Buffer) => append("stdout", chunk));
     child.stderr.on("data", (chunk: Buffer) => append("stderr", chunk));
     child.on("error", (error: NodeJS.ErrnoException) => settle(() => {
-      const code = error.code === "ENOENT" ? (options.unavailableCode ?? "PROCESS_UNAVAILABLE") : "METADATA_EXTRACTION_FAILED";
-      reject(new AppError(code, code === "YTDLP_UNAVAILABLE" ? "yt-dlp não está instalado no servidor." : "Não foi possível executar o processamento."));
+      const code = error.code === "ENOENT" ? (options.unavailableCode ?? "PROCESS_UNAVAILABLE") : failureCode;
+      reject(new AppError(code, error.code === "ENOENT" ? unavailableMessage(code as NonNullable<RunProcessOptions["unavailableCode"]>) : failureMessage));
     }));
     child.on("close", (exitCode) => settle(() => {
       if (exitCode === 0) resolve({ stdout, stderr, exitCode });
-      else reject(new AppError("METADATA_EXTRACTION_FAILED", "Não foi possível obter os dados do vídeo.", stderr.slice(0, 2_000)));
+      else reject(new AppError(failureCode, failureMessage, stderr.slice(0, 2_000)));
     }));
   });
 }
