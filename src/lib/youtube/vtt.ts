@@ -36,7 +36,7 @@ export function parseVtt(content: string): SubtitleSegment[] {
     const lines = block.split("\n").map((line) => line.trimEnd()).filter((line, index, all) => !(index === 0 && line === "" && all.length > 1));
     if (lines.length === 0) continue;
 
-    let timeLineIndex = lines.findIndex((line) => TIMESTAMP_PATTERN.test(line.trim()));
+    const timeLineIndex = lines.findIndex((line) => TIMESTAMP_PATTERN.test(line.trim()));
     if (timeLineIndex === -1) continue;
 
     const timeMatch = lines[timeLineIndex]!.trim().match(TIMESTAMP_PATTERN);
