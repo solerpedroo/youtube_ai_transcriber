@@ -1,7 +1,6 @@
 import { AppError } from "@/lib/utils/errors";
-import { assertChatCredentials, iterateSseDataLines, mapProviderHttpError } from "./http";
-import type { AIChatMessage, AIChatOptions, AIChatStreamEvent, AIProvider } from "./types";
-
+import { assertChatCredentials, iterateSseDataLines, mapProviderHttpError } from "../http";
+import type { AIChatMessage, AIChatOptions, AIChatStreamEvent, AIProvider } from "../types";
 function toOpenAiMessages(messages: readonly AIChatMessage[]) {
   return messages.map((message) => ({
     role: message.role,
