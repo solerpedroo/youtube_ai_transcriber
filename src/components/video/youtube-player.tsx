@@ -10,7 +10,7 @@ import {
 import { loadYoutubeIframeApi, type YoutubePlayerBridge } from "@/lib/youtube/iframe-api";
 
 export type YoutubePlayerHandle = {
-  seekTo: (seconds: number) => void;
+  seekTo: (seconds: number) => boolean;
 };
 
 type YoutubePlayerProps = {
@@ -24,6 +24,7 @@ export const YoutubePlayer = forwardRef<YoutubePlayerHandle, YoutubePlayerProps>
     const hostRef = useRef<HTMLDivElement | null>(null);
     const playerRef = useRef<YoutubePlayerBridge | null>(null);
     const onTimeUpdateRef = useRef(onTimeUpdate);
+    const pollTimerRef = useRef<number | undefined>(undefined);
     const [error, setError] = useState<string | null>(null);
 
     useEffect(() => {
@@ -33,15 +34,19 @@ export const YoutubePlayer = forwardRef<YoutubePlayerHandle, YoutubePlayerProps>
     useImperativeHandle(ref, () => ({
       seekTo(seconds: number) {
         const player = playerRef.current;
-        if (!player) return;
-        player.seekTo(Math.max(0, seconds), true);
-        player.playVideo();
+        if (!player) return false;
+        try {
+          player.seekTo(Math.max(0, seconds), true);
+          player.playVideo();
+          return true;
+        } catch {
+          return false;
+        }
       },
     }), []);
 
     useEffect(() => {
       let cancelled = false;
-      let pollTimer: number | undefined;
       const host = hostRef.current;
       if (!host || !videoId) return;
       if (!/^[A-Za-z0-9_-]{6,}$/.test(videoId)) {
@@ -70,7 +75,12 @@ export const YoutubePlayer = forwardRef<YoutubePlayerHandle, YoutubePlayerProps>
             },
             events: {
               onReady: () => {
-                pollTimer = window.setInterval(() => {
+                if (cancelled) return;
+                if (pollTimerRef.current !== undefined) {
+                  window.clearInterval(pollTimerRef.current);
+                }
+                pollTimerRef.current = window.setInterval(() => {
+                  if (cancelled) return;
                   const player = playerRef.current;
                   if (!player) return;
                   try {
@@ -91,7 +101,10 @@ export const YoutubePlayer = forwardRef<YoutubePlayerHandle, YoutubePlayerProps>
 
       return () => {
         cancelled = true;
-        if (pollTimer !== undefined) window.clearInterval(pollTimer);
+        if (pollTimerRef.current !== undefined) {
+          window.clearInterval(pollTimerRef.current);
+          pollTimerRef.current = undefined;
+        }
         try {
           playerRef.current?.destroy();
         } catch {
