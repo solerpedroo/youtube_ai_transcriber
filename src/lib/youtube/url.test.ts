@@ -44,4 +44,11 @@ describe("normalizeVideoMetadata", () => {
       url: "https://www.youtube.com/watch?v=dQw4w9WgXcQ",
     });
   });
+
+  it("does not expose a canonical URL outside the YouTube allowlist", () => {
+    expect(normalizeVideoMetadata({
+      id: "dQw4w9WgXcQ", title: "A video", duration: 212,
+      webpage_url: "https://example.com/redirect",
+    }, "https://www.youtube.com/watch?v=dQw4w9WgXcQ").url).toBe("https://www.youtube.com/watch?v=dQw4w9WgXcQ");
+  });
 });
