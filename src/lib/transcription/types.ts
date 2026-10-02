@@ -32,7 +32,11 @@ export type TranscriptionResult = {
 
 export type TranscriptionProvider = {
   id: TranscriptionProviderId;
-  transcribe(filePath: string, options: TranscriptionOptions): Promise<TranscriptionResult>;
+  transcribe(
+    filePath: string,
+    options: TranscriptionOptions,
+    signal?: AbortSignal,
+  ): Promise<TranscriptionResult>;
 };
 
 export type TranscriptionProgressEvent =
