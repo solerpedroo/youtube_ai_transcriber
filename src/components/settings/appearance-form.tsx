@@ -1,0 +1,54 @@
+"use client";
+
+import type { ThemePreference } from "@/types";
+import { useSettingsStore } from "@/stores/settings-store";
+
+const OPTIONS: Array<{ id: ThemePreference; label: string; description: string }> = [
+  { id: "light", label: "Claro", description: "Sempre usa o tema claro." },
+  { id: "dark", label: "Escuro", description: "Sempre usa o tema escuro." },
+  { id: "system", label: "Sistema", description: "Acompanha a preferência do sistema." },
+];
+
+export function AppearanceForm() {
+  const theme = useSettingsStore((state) => state.settings.theme);
+  const updateSettings = useSettingsStore((state) => state.updateSettings);
+  const hasHydrated = useSettingsStore((state) => state.hasHydrated);
+
+  if (!hasHydrated) {
+    return <p className="text-sm text-zinc-500">Carregando preferência de tema...</p>;
+  }
+
+  return (
+    <fieldset className="space-y-3">
+      <legend className="sr-only">Tema da interface</legend>
+      <div className="grid gap-2 sm:grid-cols-3" role="radiogroup" aria-label="Tema da interface">
+        {OPTIONS.map((option) => {
+          const selected = theme === option.id;
+          return (
+            <label
+              key={option.id}
+              className={`cursor-pointer rounded-xl border px-3 py-3 transition ${
+                selected
+                  ? "border-violet-500 bg-violet-50 ring-2 ring-violet-500/20 dark:border-violet-400 dark:bg-violet-950/40"
+                  : "border-zinc-200 bg-white hover:border-zinc-300 dark:border-zinc-700 dark:bg-zinc-950 dark:hover:border-zinc-600"
+              }`}
+            >
+              <input
+                type="radio"
+                name="theme"
+                value={option.id}
+                checked={selected}
+                onChange={() => updateSettings({ theme: option.id })}
+                className="sr-only"
+              />
+              <span className="block text-sm font-medium">{option.label}</span>
+              <span className="mt-1 block text-xs leading-5 text-zinc-500 dark:text-zinc-400">
+                {option.description}
+              </span>
+            </label>
+          );
+        })}
+      </div>
+    </fieldset>
+  );
+}
