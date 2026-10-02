@@ -1,8 +1,8 @@
 # Status do projeto
 
 - Wave: W09 — Polish (Fase 9)
-- State: in_progress
-- Last completed: W08 — Private YouTube (Fase 8)
-- Next action: W09 — tema, estados, responsivo, a11y e teste de provedor.
-- Last review: docs/reviews/W08/REVIEW.md
+- State: complete
+- Last completed: W09 — Polish (Fase 9)
+- Next action: MVP completo — manutenção e melhorias sob demanda.
+- Last review: docs/reviews/W09/REVIEW.md
 - Updated: 2026-10-02
