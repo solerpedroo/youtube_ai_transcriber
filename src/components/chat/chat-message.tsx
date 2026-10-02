@@ -38,6 +38,7 @@ export function ChatMessageBubble({ message, onSeek }: ChatMessageBubbleProps) {
                 onClick={() => onSeek(part.seconds)}
                 className="mx-0.5 inline rounded bg-violet-200 px-1 font-medium text-violet-900 hover:bg-violet-300 dark:bg-violet-900/60 dark:text-violet-100 dark:hover:bg-violet-800"
                 title={`Ir para ${part.label}`}
+                aria-label={`Ir para ${part.label}`}
               >
                 [{part.label}]
               </button>
