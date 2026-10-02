@@ -140,7 +140,7 @@ export function LibraryPageClient() {
 
         <div className="mt-6">
           <PhaseNotice>
-            A biblioteca lista, busca e exclui projetos salvos no localStorage deste navegador.
+            Biblioteca local com busca, estados vazios e exclusão — dados só neste navegador.
           </PhaseNotice>
         </div>
       </div>
