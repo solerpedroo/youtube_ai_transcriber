@@ -2,6 +2,7 @@ import { z } from "zod";
 import { isAppError } from "@/lib/utils/errors";
 import { runTranscriptionPipeline } from "@/lib/transcription/pipeline";
 import type { TranscriptionProgressEvent } from "@/lib/transcription/types";
+import { OptionalCookiesSchema } from "@/lib/youtube/cookies-schema";
 import { TranscriptionProviderIdSchema } from "@/types";
 
 export const runtime = "nodejs";
@@ -18,6 +19,7 @@ const RequestSchema = z.object({
   apiKey: z.string().trim().min(1).max(512),
   model: z.string().trim().min(1).max(128),
   language: LanguageSchema.optional(),
+  cookies: OptionalCookiesSchema,
 });
 
 function encodeEvent(event: TranscriptionProgressEvent): string {
@@ -35,8 +37,15 @@ export async function POST(request: Request) {
   const body = RequestSchema.safeParse(payload);
   if (!body.success) {
     const hasLanguageError = body.error.issues.some((issue) => issue.path[0] === "language");
+    const hasCookiesError = body.error.issues.some((issue) => issue.path[0] === "cookies");
     const hasProviderError = body.error.issues.some((issue) =>
       issue.path[0] === "provider" || issue.path[0] === "model" || issue.path[0] === "apiKey");
+    if (hasCookiesError) {
+      return Response.json({
+        code: "INVALID_COOKIES",
+        message: "O arquivo de cookies é inválido ou excede o tamanho permitido.",
+      }, { status: 400 });
+    }
     if (hasLanguageError) {
       return Response.json({ code: "INVALID_LANGUAGE", message: "Informe um código de idioma válido." }, { status: 400 });
     }
@@ -71,6 +80,7 @@ export async function POST(request: Request) {
             apiKey: body.data.apiKey,
             model: body.data.model,
             language: body.data.language,
+            cookies: body.data.cookies,
             signal: request.signal,
             onProgress: (event) => send(event),
           });
