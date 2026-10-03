@@ -26,8 +26,8 @@ export function MobileNav() {
               key={href}
               href={href}
               aria-current={active ? "page" : undefined}
-              className={`flex flex-col items-center gap-1 rounded-lg px-2 py-2 text-[11px] font-medium transition-colors ${
-                active ? "text-brand" : "text-muted-foreground"
+              className={`flex flex-col items-center gap-1 rounded-xl px-2 py-2 text-[11px] font-medium transition-colors ${
+                active ? "bg-brand/10 text-brand" : "text-muted-foreground hover:bg-muted/60"
               }`}
             >
               <span className="relative">
