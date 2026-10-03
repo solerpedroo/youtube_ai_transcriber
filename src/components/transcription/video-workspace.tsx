@@ -287,7 +287,7 @@ export function VideoWorkspace({ projectId }: { projectId: string }) {
           id="workspace-panel-chat"
           role="tabpanel"
           aria-labelledby="workspace-tab-chat"
-          className={`rounded-2xl border border-zinc-200 bg-white p-5 shadow-sm dark:border-zinc-800 dark:bg-zinc-900 ${tab === "chat" ? "block" : "hidden lg:block"}`}
+          className={`flex min-h-[28rem] max-h-[calc(100dvh-11rem)] flex-col overflow-hidden rounded-2xl border border-zinc-200 bg-white p-5 shadow-sm dark:border-zinc-800 dark:bg-zinc-900 lg:sticky lg:top-24 lg:max-h-[calc(100vh-7rem)] ${tab === "chat" ? "flex" : "hidden lg:flex"}`}
         >
           <ChatPanel key={project.id} project={project} onSeek={seekTo} />
         </aside>
