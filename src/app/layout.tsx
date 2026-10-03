@@ -16,10 +16,10 @@ const geistMono = Geist_Mono({
 
 export const metadata: Metadata = {
   title: {
-    default: "YouTube AI Transcriber",
-    template: "%s | YouTube AI Transcriber",
+    default: "YouTube Transcriber",
+    template: "%s | YouTube Transcriber",
   },
-  description: "Transcreva e estude vídeos do YouTube com IA, localmente.",
+  description: "Transcreva, pesquise e converse com vídeos do YouTube — dados locais no navegador.",
 };
 
 export default function RootLayout({ children }: LayoutProps<"/">) {
