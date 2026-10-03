@@ -37,16 +37,18 @@ export function ChatInput({ disabled, isStreaming, onSend, onStop }: ChatInputPr
   return (
     <form className="flex items-end gap-2" onSubmit={handleSubmit}>
       <label className="sr-only" htmlFor="chat-input">Pergunta sobre o vídeo</label>
-      <Textarea
-        id="chat-input"
-        rows={2}
-        value={value}
-        disabled={disabled}
-        onChange={(event) => setValue(event.target.value)}
-        onKeyDown={handleKeyDown}
-        placeholder="Faça uma pergunta sobre o vídeo..."
-        className="min-h-16 flex-1 rounded-xl"
-      />
+      <div className="focus-within-ring-brand min-h-16 flex-1 rounded-xl border border-input bg-muted/30 px-3 py-2">
+        <Textarea
+          id="chat-input"
+          rows={2}
+          value={value}
+          disabled={disabled}
+          onChange={(event) => setValue(event.target.value)}
+          onKeyDown={handleKeyDown}
+          placeholder="Faça uma pergunta sobre o vídeo..."
+          className="min-h-12 resize-none border-0 bg-transparent p-0 shadow-none focus-visible:border-0 focus-visible:ring-0"
+        />
+      </div>
       {isStreaming ? (
         <Button type="button" variant="outline" onClick={onStop}>
           <LoaderCircle className="size-4 animate-spin" />Parar
