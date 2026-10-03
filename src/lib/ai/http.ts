@@ -33,11 +33,16 @@ export function mapProviderHttpError(status: number, bodyText: string): AppError
   ) {
     return new AppError(
       "INVALID_PROVIDER",
-      providerMessage ?? "O modelo de chat não existe ou não está disponível na sua conta.",
+      "O modelo de chat não existe ou não está disponível na sua conta.",
+      providerMessage ?? bodyText.slice(0, 500),
     );
   }
   if (providerMessage) {
-    return new AppError("CHAT_FAILED", providerMessage, bodyText.slice(0, 500));
+    return new AppError(
+      "CHAT_FAILED",
+      "Não foi possível obter resposta do provedor de chat.",
+      providerMessage,
+    );
   }
   return new AppError(
     "CHAT_FAILED",
