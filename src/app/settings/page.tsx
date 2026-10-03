@@ -6,7 +6,7 @@ import { PhaseNotice } from "@/components/foundation/phase-notice";
 import { AppShell } from "@/components/layout/app-shell";
 import { PageHeader } from "@/components/layout/page-header";
 import type { ReactNode } from "react";
-import { Bot, KeyRound, Monitor, ShieldCheck, Video } from "lucide-react";
+import { KeyRound, MessageSquareText, Monitor, ShieldCheck, Video } from "lucide-react";
 
 function SettingsSection({
   icon: Icon,
@@ -14,7 +14,7 @@ function SettingsSection({
   description,
   children,
 }: {
-  icon: typeof Bot;
+  icon: typeof MessageSquareText;
   title: string;
   description?: string;
   children: ReactNode;
@@ -23,7 +23,7 @@ function SettingsSection({
     <section className="surface-card hover-lift surface-in p-5 sm:p-6">
       <div className="flex gap-4">
         <span className="icon-tile grid size-10 shrink-0 place-items-center rounded-xl">
-          <Icon className="size-4 text-brand" />
+          <Icon className="size-4 text-foreground/85" strokeWidth={2} />
         </span>
         <div className="min-w-0 flex-1">
           <h2 className="font-medium">{title}</h2>
@@ -43,12 +43,12 @@ export default function SettingsPage() {
       <PageHeader
         label="Preferências locais"
         title="Configurações"
-        description="Controle provedores de IA, transcrição e acesso ao YouTube. Tudo fica só neste navegador."
+        description="Provedores de chat e transcrição, cookies do YouTube e aparência — tudo só neste navegador."
       />
 
       <div className="space-y-4">
         <SettingsSection
-          icon={Bot}
+          icon={MessageSquareText}
           title="Provedor de chat"
           description="Modelo e chave usados no assistente sobre a transcrição."
         >
