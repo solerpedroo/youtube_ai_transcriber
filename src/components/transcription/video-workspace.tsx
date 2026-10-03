@@ -7,6 +7,7 @@ import type { Transcript, VideoProject } from "@/types";
 import type { TranscriptionProgressEvent } from "@/lib/transcription/types";
 import { ChatPanel } from "@/components/chat/chat-panel";
 import { StatusMessage } from "@/components/foundation/status-message";
+import { LoadingPlaceholder } from "@/components/ui/loading-placeholder";
 import { AppShell } from "@/components/layout/app-shell";
 import { WorkspaceTabs } from "@/components/layout/workspace-tabs";
 import { TranscriptView } from "@/components/transcript/transcript-view";
@@ -153,7 +154,10 @@ export function VideoWorkspace({ projectId }: { projectId: string }) {
   if (!hasHydratedProjects || !hasHydratedSettings) {
     return (
       <AppShell compact>
-        <p className="text-sm text-muted-foreground">Carregando projeto local...</p>
+        <div className="surface-card max-w-lg p-6">
+          <p className="text-sm font-medium">Carregando projeto</p>
+          <LoadingPlaceholder className="mt-4" lines={4} />
+        </div>
       </AppShell>
     );
   }
@@ -166,7 +170,7 @@ export function VideoWorkspace({ projectId }: { projectId: string }) {
           <p className="mt-2 text-sm text-muted-foreground">
             Este projeto não existe neste navegador.
           </p>
-          <Button className="mt-4" onClick={() => router.push("/")}>Voltar ao início</Button>
+          <Button className="mt-4" variant="brand" onClick={() => router.push("/")}>Voltar ao início</Button>
         </div>
       </AppShell>
     );
@@ -260,7 +264,7 @@ export function VideoWorkspace({ projectId }: { projectId: string }) {
               </div>
             ) : (
               <div className="rounded-xl border border-dashed border-border p-5 text-sm leading-6 text-muted-foreground">
-                Nenhuma transcrição ainda. Importe legendas na criação do projeto ou gere uma transcrição por IA.
+                Nenhuma transcrição ainda. Use legendas na importação ou transcreva o áudio com o botão acima.
               </div>
             )}
           </div>
