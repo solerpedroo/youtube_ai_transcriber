@@ -4,6 +4,7 @@ import { useState, type FormEvent } from "react";
 import type { TranscriptionProviderId } from "@/types";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { Select } from "@/components/ui/select";
 import { useSettingsStore } from "@/stores/settings-store";
 
 const PROVIDERS: Array<{ id: TranscriptionProviderId; label: string; models: string[] }> = [
@@ -42,10 +43,9 @@ export function TranscriptionSettingsForm() {
       <div className="grid gap-4 sm:grid-cols-2">
         <label className="grid gap-1.5 text-sm">
           <span className="font-medium">Provedor</span>
-          <select
+          <Select
             name="provider"
             defaultValue={current.provider}
-            className="h-10 rounded-lg border border-zinc-300 bg-white px-3 dark:border-zinc-700 dark:bg-zinc-950"
             onChange={(event) => {
               const provider = event.target.value as TranscriptionProviderId;
               const models = PROVIDERS.find((item) => item.id === provider)?.models ?? [];
@@ -61,22 +61,21 @@ export function TranscriptionSettingsForm() {
             {PROVIDERS.map((provider) => (
               <option key={provider.id} value={provider.id}>{provider.label}</option>
             ))}
-          </select>
+          </Select>
         </label>
         <label className="grid gap-1.5 text-sm">
           <span className="font-medium">Modelo</span>
-          <select
+          <Select
             name="model"
             value={current.model}
             onChange={(event) => updateSettings({
               transcriptionProvider: { ...current, model: event.target.value },
             })}
-            className="h-10 rounded-lg border border-zinc-300 bg-white px-3 dark:border-zinc-700 dark:bg-zinc-950"
           >
             {providerMeta.models.map((model) => (
               <option key={model} value={model}>{model}</option>
             ))}
-          </select>
+          </Select>
         </label>
       </div>
       <label className="grid gap-1.5 text-sm">
