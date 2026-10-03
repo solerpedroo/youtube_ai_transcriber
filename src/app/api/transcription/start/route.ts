@@ -2,7 +2,9 @@ import { z } from "zod";
 import { isAppError } from "@/lib/utils/errors";
 import { runTranscriptionPipeline } from "@/lib/transcription/pipeline";
 import type { TranscriptionProgressEvent } from "@/lib/transcription/types";
+import { guardApiRequest, readJsonBodyWithLimit } from "@/lib/security/api-request-guard";
 import { OptionalCookiesSchema } from "@/lib/youtube/cookies-schema";
+import { YouTubeUrlSchema } from "@/lib/youtube/url";
 import { TranscriptionProviderIdSchema } from "@/types";
 
 export const runtime = "nodejs";
@@ -14,7 +16,7 @@ const LanguageSchema = z.string().trim().regex(
 );
 
 const RequestSchema = z.object({
-  url: z.string().trim().min(1).max(2_048),
+  url: YouTubeUrlSchema,
   provider: TranscriptionProviderIdSchema,
   apiKey: z.string().trim().min(1).max(512),
   model: z.string().trim().min(1).max(128),
@@ -27,12 +29,12 @@ function encodeEvent(event: TranscriptionProgressEvent): string {
 }
 
 export async function POST(request: Request) {
-  let payload: unknown;
-  try {
-    payload = await request.json();
-  } catch {
-    return Response.json({ code: "INVALID_URL", message: "Envie um corpo JSON válido." }, { status: 400 });
-  }
+  const blocked = guardApiRequest(request, { profile: "transcription", maxBodyBytes: 1_100_000 });
+  if (blocked) return blocked;
+
+  const parsedBody = await readJsonBodyWithLimit(request, 1_100_000);
+  if (!parsedBody.ok) return parsedBody.response;
+  const payload = parsedBody.payload;
 
   const body = RequestSchema.safeParse(payload);
   if (!body.success) {
@@ -75,7 +77,7 @@ export async function POST(request: Request) {
       void (async () => {
         try {
           const transcript = await runTranscriptionPipeline({
-            url: body.data.url,
+            url: body.data.url.url,
             provider: body.data.provider,
             apiKey: body.data.apiKey,
             model: body.data.model,
