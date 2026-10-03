@@ -5,6 +5,7 @@ import type { AIProviderId } from "@/types";
 import { StatusMessage } from "@/components/foundation/status-message";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { Select } from "@/components/ui/select";
 import { useSettingsStore } from "@/stores/settings-store";
 
 const PROVIDERS: Array<{
@@ -16,7 +17,7 @@ const PROVIDERS: Array<{
   { id: "openai", label: "OpenAI", models: ["gpt-4.1-mini", "gpt-4.1", "gpt-4o-mini"] },
   { id: "anthropic", label: "Anthropic", models: ["claude-sonnet-4-5", "claude-haiku-4-5"] },
   { id: "gemini", label: "Google Gemini", models: ["gemini-2.5-flash", "gemini-2.5-pro"] },
-  { id: "groq", label: "Groq", models: ["llama-3.3-70b-versatile", "openai/gpt-oss-120b"] },
+  { id: "groq", label: "Groq", models: ["openai/gpt-oss-120b", "qwen/qwen3.6-27b"] },
   {
     id: "openai-compatible",
     label: "OpenAI-compatible",
@@ -44,12 +45,12 @@ export function ChatSettingsForm() {
     const data = new FormData(form);
     const provider = String(data.get("provider") ?? "openai") as AIProviderId;
     const model = String(data.get("model") ?? "").trim();
-    const apiKey = String(data.get("apiKey") ?? "");
+    const apiKeyFromForm = String(data.get("apiKey") ?? "").trim();
     const baseUrlValue = String(data.get("baseUrl") ?? "").trim();
     return {
       provider,
       model,
-      apiKey,
+      apiKey: apiKeyFromForm || current.apiKey.trim(),
       baseUrl: provider === "openai-compatible" && baseUrlValue ? baseUrlValue : undefined,
     };
   }
@@ -154,10 +155,9 @@ export function ChatSettingsForm() {
       <div className="grid gap-4 sm:grid-cols-2">
         <label className="grid gap-1.5 text-sm">
           <span className="font-medium">Provedor</span>
-          <select
+          <Select
             name="provider"
             value={current.provider}
-            className="h-10 rounded-lg border border-zinc-300 bg-white px-3 dark:border-zinc-700 dark:bg-zinc-950"
             onChange={(event) => {
               const provider = event.target.value as AIProviderId;
               const meta = PROVIDERS.find((item) => item.id === provider) ?? PROVIDERS[0]!;
@@ -174,7 +174,7 @@ export function ChatSettingsForm() {
             {PROVIDERS.map((provider) => (
               <option key={provider.id} value={provider.id}>{provider.label}</option>
             ))}
-          </select>
+          </Select>
         </label>
         <label className="grid gap-1.5 text-sm">
           <span className="font-medium">Modelo</span>
@@ -216,7 +216,10 @@ export function ChatSettingsForm() {
           name="apiKey"
           type="password"
           autoComplete="off"
-          defaultValue={current.apiKey}
+          value={current.apiKey}
+          onChange={(event) => updateSettings({
+            chatProvider: { ...current, apiKey: event.target.value },
+          })}
           placeholder="Armazenada apenas neste navegador"
         />
       </label>
