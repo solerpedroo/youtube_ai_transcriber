@@ -69,7 +69,7 @@ export function LibraryPageClient() {
       ) : filtered.length === 0 ? (
         <div className="surface-card mt-6 p-8 text-center sm:p-12">
           <span className="icon-tile mx-auto grid size-12 place-items-center rounded-xl">
-            <Video className="size-5 text-brand" />
+            <Video className="size-5 text-foreground/80" />
           </span>
           <h2 className="mt-4 text-lg font-semibold">
             {projects.length === 0 ? "Sua biblioteca está vazia" : "Nenhum resultado"}
@@ -88,7 +88,7 @@ export function LibraryPageClient() {
           {filtered.map((project) => (
             <li
               key={project.id}
-              className="surface-interactive flex flex-col gap-4 p-4 sm:flex-row sm:items-center"
+              className="surface-card hover-lift surface-in flex flex-col gap-4 p-4 sm:flex-row sm:items-center"
             >
               {project.metadata.thumbnail ? (
                 // eslint-disable-next-line @next/next/no-img-element -- remote YouTube thumbnails validated as HTTPS.
