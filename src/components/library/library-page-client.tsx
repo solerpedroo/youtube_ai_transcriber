@@ -5,6 +5,7 @@ import { useEffect, useMemo, useState } from "react";
 import { Clock3, Search, Video } from "lucide-react";
 import type { VideoProject } from "@/types";
 import { AppNotice } from "@/components/foundation/app-notice";
+import { LoadingPlaceholder } from "@/components/ui/loading-placeholder";
 import { AppShell } from "@/components/layout/app-shell";
 import { PageHeader } from "@/components/layout/page-header";
 import { LibraryProjectCard } from "@/components/library/library-project-card";
@@ -53,7 +54,7 @@ export function LibraryPageClient() {
         )}
       />
 
-      <div className="surface-card surface-in mt-2 flex h-11 items-center gap-3 px-3">
+      <div className="surface-card surface-in focus-within:ring-brand/15 mt-2 flex h-11 items-center gap-3 px-3 transition-shadow focus-within:border-brand focus-within:ring-4">
         <Search className="size-4 text-muted-foreground" />
         <Input
           aria-label="Pesquisar vídeos"
@@ -65,7 +66,10 @@ export function LibraryPageClient() {
       </div>
 
       {!hasHydrated ? (
-        <p className="mt-6 text-sm text-muted-foreground">Carregando biblioteca local...</p>
+        <div className="surface-card mt-6 p-6">
+          <p className="text-sm font-medium">Carregando biblioteca</p>
+          <LoadingPlaceholder className="mt-4" lines={3} />
+        </div>
       ) : filtered.length === 0 ? (
         <div className="surface-card mt-6 p-8 text-center sm:p-12">
           <span className="icon-tile mx-auto grid size-12 place-items-center rounded-xl">
