@@ -5,7 +5,14 @@ import type { AIProviderId } from "@/types";
 import { StatusMessage } from "@/components/foundation/status-message";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { Select } from "@/components/ui/select";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
+import { SettingsField } from "@/components/settings/settings-field";
 import { useSettingsStore } from "@/stores/settings-store";
 
 const PROVIDERS: Array<{
@@ -36,6 +43,10 @@ export function ChatSettingsForm() {
   const testAbortRef = useRef<AbortController | null>(null);
   const current = settings.chatProvider;
   const providerMeta = PROVIDERS.find((item) => item.id === current.provider) ?? PROVIDERS[0]!;
+  const modelOptions = providerMeta.models.includes(current.model)
+    ? providerMeta.models
+    : [current.model, ...providerMeta.models];
+  const useCustomModelField = providerMeta.needsBaseUrl;
 
   useEffect(() => () => {
     testAbortRef.current?.abort();
@@ -43,15 +54,13 @@ export function ChatSettingsForm() {
 
   function readChatConfig(form: HTMLFormElement) {
     const data = new FormData(form);
-    const provider = String(data.get("provider") ?? "openai") as AIProviderId;
-    const model = String(data.get("model") ?? "").trim();
     const apiKeyFromForm = String(data.get("apiKey") ?? "").trim();
     const baseUrlValue = String(data.get("baseUrl") ?? "").trim();
     return {
-      provider,
-      model,
+      provider: current.provider,
+      model: current.model.trim(),
       apiKey: apiKeyFromForm || current.apiKey.trim(),
-      baseUrl: provider === "openai-compatible" && baseUrlValue ? baseUrlValue : undefined,
+      baseUrl: current.provider === "openai-compatible" && baseUrlValue ? baseUrlValue : undefined,
     };
   }
 
@@ -141,7 +150,7 @@ export function ChatSettingsForm() {
   }
 
   if (!hasHydrated) {
-    return <p className="text-sm text-zinc-500">Carregando preferências locais...</p>;
+    return <p className="text-sm text-muted-foreground">Carregando preferências locais...</p>;
   }
 
   return (
@@ -153,13 +162,11 @@ export function ChatSettingsForm() {
       }}
     >
       <div className="grid gap-4 sm:grid-cols-2">
-        <label className="grid gap-1.5 text-sm">
-          <span className="font-medium">Provedor</span>
+        <SettingsField label="Provedor">
           <Select
-            name="provider"
             value={current.provider}
-            onChange={(event) => {
-              const provider = event.target.value as AIProviderId;
+            onValueChange={(value) => {
+              const provider = value as AIProviderId;
               const meta = PROVIDERS.find((item) => item.id === provider) ?? PROVIDERS[0]!;
               updateSettings({
                 chatProvider: {
@@ -171,33 +178,51 @@ export function ChatSettingsForm() {
               });
             }}
           >
-            {PROVIDERS.map((provider) => (
-              <option key={provider.id} value={provider.id}>{provider.label}</option>
-            ))}
+            <SelectTrigger>
+              <SelectValue placeholder="Escolha o provedor" />
+            </SelectTrigger>
+            <SelectContent>
+              {PROVIDERS.map((provider) => (
+                <SelectItem key={provider.id} value={provider.id}>
+                  {provider.label}
+                </SelectItem>
+              ))}
+            </SelectContent>
           </Select>
-        </label>
-        <label className="grid gap-1.5 text-sm">
-          <span className="font-medium">Modelo</span>
-          <Input
-            name="model"
-            value={current.model}
-            onChange={(event) => updateSettings({
-              chatProvider: { ...current, model: event.target.value },
-            })}
-            list="chat-model-suggestions"
-            placeholder="ID do modelo"
-          />
-          <datalist id="chat-model-suggestions">
-            {providerMeta.models.map((model) => (
-              <option key={model} value={model} />
-            ))}
-          </datalist>
-        </label>
+        </SettingsField>
+        <SettingsField label="Modelo">
+          {useCustomModelField ? (
+            <Input
+              value={current.model}
+              onChange={(event) => updateSettings({
+                chatProvider: { ...current, model: event.target.value },
+              })}
+              placeholder="ID do modelo"
+            />
+          ) : (
+            <Select
+              value={current.model}
+              onValueChange={(model) => updateSettings({
+                chatProvider: { ...current, model },
+              })}
+            >
+              <SelectTrigger>
+                <SelectValue placeholder="Escolha o modelo" />
+              </SelectTrigger>
+              <SelectContent>
+                {modelOptions.map((model) => (
+                  <SelectItem key={model} value={model}>
+                    {model}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          )}
+        </SettingsField>
       </div>
 
       {providerMeta.needsBaseUrl && (
-        <label className="grid gap-1.5 text-sm">
-          <span className="font-medium">Base URL</span>
+        <SettingsField label="Base URL">
           <Input
             name="baseUrl"
             type="url"
@@ -207,11 +232,10 @@ export function ChatSettingsForm() {
             })}
             placeholder="https://exemplo.com/v1"
           />
-        </label>
+        </SettingsField>
       )}
 
-      <label className="grid gap-1.5 text-sm">
-        <span className="font-medium">Chave de API</span>
+      <SettingsField label="Chave de API">
         <Input
           name="apiKey"
           type="password"
@@ -222,7 +246,7 @@ export function ChatSettingsForm() {
           })}
           placeholder="Armazenada apenas neste navegador"
         />
-      </label>
+      </SettingsField>
 
       <div className="flex flex-wrap items-center gap-3">
         <Button type="submit">Salvar chat</Button>
