@@ -116,9 +116,9 @@ export const YoutubePlayer = forwardRef<YoutubePlayerHandle, YoutubePlayerProps>
 
     return (
       <div className={className}>
-        <div ref={hostRef} className="aspect-video w-full bg-zinc-950" />
+        <div ref={hostRef} className="aspect-video w-full bg-black" />
         {error && (
-          <p className="bg-zinc-950 px-4 py-3 text-sm text-red-300" role="alert">{error}</p>
+          <p className="border-t border-destructive/30 bg-destructive/10 px-4 py-3 text-sm text-destructive" role="alert">{error}</p>
         )}
       </div>
     );
