@@ -1,14 +1,43 @@
 import { AppError } from "@/lib/utils/errors";
 
+function readProviderErrorMessage(bodyText: string): string | null {
+  try {
+    const payload = JSON.parse(bodyText) as {
+      error?: { message?: string };
+      message?: string;
+    };
+    const message = payload.error?.message ?? payload.message;
+    return typeof message === "string" && message.trim() ? message.trim() : null;
+  } catch {
+    return null;
+  }
+}
+
 export function mapProviderHttpError(status: number, bodyText: string): AppError {
+  const providerMessage = readProviderErrorMessage(bodyText);
+  const normalizedBody = bodyText.toLowerCase();
+
   if (status === 401 || status === 403) {
     return new AppError("PROVIDER_AUTH_FAILED", "A chave de API do provedor de chat foi rejeitada.");
   }
   if (status === 429) {
     return new AppError("RATE_LIMITED", "O provedor de chat atingiu o limite de requisições.");
   }
-  if (status === 413 || bodyText.toLowerCase().includes("context_length") || bodyText.toLowerCase().includes("too large")) {
+  if (status === 413 || normalizedBody.includes("context_length") || normalizedBody.includes("too large")) {
     return new AppError("CONTEXT_TOO_LARGE", "O contexto enviado excede o limite do modelo.");
+  }
+  if (
+    status === 404
+    || normalizedBody.includes("does not exist")
+    || normalizedBody.includes("model_not_found")
+  ) {
+    return new AppError(
+      "INVALID_PROVIDER",
+      providerMessage ?? "O modelo de chat não existe ou não está disponível na sua conta.",
+    );
+  }
+  if (providerMessage) {
+    return new AppError("CHAT_FAILED", providerMessage, bodyText.slice(0, 500));
   }
   return new AppError(
     "CHAT_FAILED",
