@@ -6,6 +6,7 @@ import { ImportVideoCard } from "@/components/foundation/import-video-card";
 import { PageHeader } from "@/components/layout/page-header";
 import { QuickLinks } from "@/components/dashboard/quick-links";
 import { StatCard } from "@/components/dashboard/stat-card";
+import { SectionHeading } from "@/components/layout/section-heading";
 import { useProjectStore } from "@/stores/project-store";
 
 export function HomeOverview() {
@@ -30,6 +31,7 @@ export function HomeOverview() {
 
       <ImportVideoCard />
 
+      <SectionHeading title="Visão geral" description="Resumo do que você já tem salvo localmente." />
       <div className="grid gap-3 sm:grid-cols-3">
         <StatCard
           label="Projetos"
@@ -53,6 +55,7 @@ export function HomeOverview() {
         />
       </div>
 
+      <SectionHeading title="Atalhos" description="Continue de onde parou ou ajuste provedores." className="mt-2" />
       <QuickLinks />
     </div>
   );
