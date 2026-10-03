@@ -10,7 +10,7 @@ const links = [
   },
   {
     href: "/settings",
-    label: "Provedores de IA",
+    label: "Provedores",
     description: "Chat, transcrição e chaves locais.",
     icon: Settings2,
   },
@@ -29,11 +29,11 @@ export function QuickLinks() {
         <Link
           key={`${item.href}-${item.label}`}
           href={item.href}
-          className={`surface-interactive surface-in group flex flex-col gap-3 p-4 sm:p-5 stagger-${index + 1}`}
+          className={`surface-card hover-lift surface-in group flex flex-col gap-3 p-4 sm:p-5 stagger-${index + 1}`}
         >
           <div className="flex items-start justify-between gap-2">
             <span className="icon-tile grid size-10 place-items-center rounded-xl">
-              <item.icon className="size-4 text-brand" />
+              <item.icon className="size-4 text-foreground/80 transition-colors group-hover:text-brand" />
             </span>
             <ArrowUpRight className="size-4 text-muted-foreground transition-transform group-hover:-translate-y-0.5 group-hover:translate-x-0.5 group-hover:text-brand" />
           </div>
