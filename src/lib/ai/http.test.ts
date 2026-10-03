@@ -12,7 +12,8 @@ describe("mapProviderHttpError", () => {
       }),
     );
     expect(error.code).toBe("INVALID_PROVIDER");
-    expect(error.message).toContain("llama-3.3-70b-versatile");
+    expect(error.message).toBe("O modelo de chat não existe ou não está disponível na sua conta.");
+    expect(error.details).toContain("llama-3.3-70b-versatile");
   });
 
   it("falls back to a generic message when the provider body is opaque", () => {
