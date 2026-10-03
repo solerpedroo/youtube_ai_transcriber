@@ -24,8 +24,8 @@ export function HomeOverview() {
     <div className="space-y-8">
       <PageHeader
         label="Workspace local"
-        title="Transforme vídeos em conhecimento pesquisável"
-        description="Importe um link, use legendas quando existirem e converse com a transcrição usando IA — tudo no seu navegador."
+        title="Transcreva, pesquise e retome vídeos do YouTube"
+        description="Importe um link, aproveite legendas quando existirem e converse com o conteúdo — tudo salvo localmente no navegador."
       />
 
       <div className="grid gap-3 sm:grid-cols-3">
