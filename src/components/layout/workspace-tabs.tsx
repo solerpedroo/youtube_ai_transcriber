@@ -32,8 +32,8 @@ export function WorkspaceTabs({ tabs, active, onChange, onKeyDown, className = "
             aria-controls={`workspace-panel-${item.id}`}
             tabIndex={selected ? 0 : -1}
             onClick={() => onChange(item.id)}
-            className={`flex-1 rounded-lg px-3 py-2.5 text-sm font-medium transition-all ${
-              selected ? "workspace-tab-active text-foreground" : "text-muted-foreground hover:text-foreground"
+            className={`flex-1 rounded-lg px-3 py-2.5 text-sm font-medium transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand/35 ${
+              selected ? "workspace-tab-active text-foreground shadow-sm" : "text-muted-foreground hover:bg-muted/50 hover:text-foreground"
             }`}
           >
             {item.label}
