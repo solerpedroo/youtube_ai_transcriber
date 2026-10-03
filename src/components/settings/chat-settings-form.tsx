@@ -261,7 +261,7 @@ export function ChatSettingsForm() {
         >
           {testStatus === "loading" ? "Testando..." : "Testar provedor"}
         </Button>
-        {saved && <p className="text-sm text-emerald-700 dark:text-emerald-300">Preferências salvas localmente.</p>}
+        {saved && <StatusMessage tone="success" className="w-full sm:w-auto">Preferências salvas localmente.</StatusMessage>}
       </div>
 
       {testStatus === "loading" && (
