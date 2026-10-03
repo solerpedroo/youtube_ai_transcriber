@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
-import { LoaderCircle, WandSparkles } from "lucide-react";
+import { LoaderCircle, Mic } from "lucide-react";
 import type { Transcript, VideoProject } from "@/types";
 import type { TranscriptionProgressEvent } from "@/lib/transcription/types";
 import { ChatPanel } from "@/components/chat/chat-panel";
@@ -238,7 +238,7 @@ export function VideoWorkspace({ projectId }: { projectId: string }) {
               <Button type="button" size="sm" variant="brand" disabled={isTranscribing} onClick={() => void startTranscription()}>
                 {isTranscribing
                   ? <><LoaderCircle className="size-4 animate-spin" />Transcrevendo</>
-                  : <><WandSparkles className="size-4" />{project.transcript ? "Nova transcrição IA" : "Transcrever com IA"}</>}
+                  : <><Mic className="size-4" />{project.transcript ? "Transcrever de novo" : "Transcrever áudio"}</>}
               </Button>
             </div>
 
