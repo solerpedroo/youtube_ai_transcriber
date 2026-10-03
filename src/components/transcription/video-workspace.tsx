@@ -6,8 +6,9 @@ import { LoaderCircle, WandSparkles } from "lucide-react";
 import type { Transcript, VideoProject } from "@/types";
 import type { TranscriptionProgressEvent } from "@/lib/transcription/types";
 import { ChatPanel } from "@/components/chat/chat-panel";
-import { PhaseNotice } from "@/components/foundation/phase-notice";
+import { StatusMessage } from "@/components/foundation/status-message";
 import { AppShell } from "@/components/layout/app-shell";
+import { WorkspaceTabs } from "@/components/layout/workspace-tabs";
 import { TranscriptView } from "@/components/transcript/transcript-view";
 import { Button } from "@/components/ui/button";
 import { VideoHeader } from "@/components/video/video-header";
@@ -152,7 +153,7 @@ export function VideoWorkspace({ projectId }: { projectId: string }) {
   if (!hasHydratedProjects || !hasHydratedSettings) {
     return (
       <AppShell compact>
-        <p className="text-sm text-zinc-500">Carregando projeto local...</p>
+        <p className="text-sm text-muted-foreground">Carregando projeto local...</p>
       </AppShell>
     );
   }
@@ -160,9 +161,9 @@ export function VideoWorkspace({ projectId }: { projectId: string }) {
   if (!project) {
     return (
       <AppShell compact>
-        <div className="mx-auto max-w-lg rounded-2xl border border-zinc-200 bg-white p-6 dark:border-zinc-800 dark:bg-zinc-900">
+        <div className="surface-card mx-auto max-w-lg p-6">
           <h1 className="text-xl font-semibold">Projeto não encontrado</h1>
-          <p className="mt-2 text-sm text-zinc-600 dark:text-zinc-400">
+          <p className="mt-2 text-sm text-muted-foreground">
             Este projeto não existe neste navegador.
           </p>
           <Button className="mt-4" onClick={() => router.push("/")}>Voltar ao início</Button>
@@ -184,10 +185,11 @@ export function VideoWorkspace({ projectId }: { projectId: string }) {
         statusLabel={project.transcript ? "Transcrição disponível" : "Sem transcrição"}
       />
 
-      <div
-        className="mb-4 flex gap-1 rounded-xl bg-zinc-100 p-1 dark:bg-zinc-900 lg:hidden"
-        role="tablist"
-        aria-label="Seções do espaço de trabalho"
+      <WorkspaceTabs
+        className="mb-4 lg:hidden"
+        tabs={tabs}
+        active={tab}
+        onChange={setTab}
         onKeyDown={(event) => {
           if (event.key !== "ArrowRight" && event.key !== "ArrowLeft" && event.key !== "Home" && event.key !== "End") {
             return;
@@ -204,30 +206,10 @@ export function VideoWorkspace({ projectId }: { projectId: string }) {
           setTab(next.id);
           document.getElementById(`workspace-tab-${next.id}`)?.focus();
         }}
-      >
-        {tabs.map((item) => (
-          <button
-            key={item.id}
-            type="button"
-            role="tab"
-            id={`workspace-tab-${item.id}`}
-            aria-selected={tab === item.id}
-            aria-controls={`workspace-panel-${item.id}`}
-            tabIndex={tab === item.id ? 0 : -1}
-            onClick={() => setTab(item.id)}
-            className={`flex-1 rounded-lg px-3 py-2 text-sm font-medium transition ${
-              tab === item.id
-                ? "bg-white text-zinc-950 shadow-sm dark:bg-zinc-800 dark:text-white"
-                : "text-zinc-500"
-            }`}
-          >
-            {item.label}
-          </button>
-        ))}
-      </div>
+      />
 
       <div className="grid gap-6 lg:grid-cols-[minmax(0,1.85fr)_minmax(20rem,1fr)]">
-        <section className={`overflow-hidden rounded-2xl border border-zinc-200 bg-white shadow-sm dark:border-zinc-800 dark:bg-zinc-900 ${tab === "chat" ? "hidden lg:block" : ""}`}>
+        <section className={`surface-card surface-in overflow-hidden ${tab === "chat" ? "hidden lg:block" : ""}`}>
           <div
             id="workspace-panel-video"
             role="tabpanel"
@@ -248,9 +230,12 @@ export function VideoWorkspace({ projectId }: { projectId: string }) {
             aria-labelledby="workspace-tab-transcript"
             className={`p-5 ${tab === "video" ? "hidden lg:block" : ""}`}
           >
-            <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
-              <h2 className="font-semibold">Transcrição</h2>
-              <Button type="button" size="sm" disabled={isTranscribing} onClick={() => void startTranscription()}>
+            <div className="mb-4 flex flex-wrap items-center justify-between gap-3 border-b border-border/60 pb-4">
+              <div>
+                <p className="label-caps">Texto do vídeo</p>
+                <h2 className="font-semibold">Transcrição</h2>
+              </div>
+              <Button type="button" size="sm" variant="brand" disabled={isTranscribing} onClick={() => void startTranscription()}>
                 {isTranscribing
                   ? <><LoaderCircle className="size-4 animate-spin" />Transcrevendo</>
                   : <><WandSparkles className="size-4" />{project.transcript ? "Nova transcrição IA" : "Transcrever com IA"}</>}
@@ -258,12 +243,10 @@ export function VideoWorkspace({ projectId }: { projectId: string }) {
             </div>
 
             {progress && (
-              <p className="mb-3 text-sm text-violet-700 dark:text-violet-300" aria-live="polite">{progress}</p>
+              <StatusMessage tone="loading" className="mb-3">{progress}</StatusMessage>
             )}
             {error && (
-              <p className="mb-3 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700 dark:border-red-950 dark:bg-red-950/30 dark:text-red-300" role="alert">
-                {error}
-              </p>
+              <StatusMessage tone="error" className="mb-3">{error}</StatusMessage>
             )}
 
             {project.transcript ? (
@@ -276,7 +259,7 @@ export function VideoWorkspace({ projectId }: { projectId: string }) {
                 />
               </div>
             ) : (
-              <div className="rounded-xl border border-dashed border-zinc-300 p-5 text-sm leading-6 text-zinc-500 dark:border-zinc-700">
+              <div className="rounded-xl border border-dashed border-border p-5 text-sm leading-6 text-muted-foreground">
                 Nenhuma transcrição ainda. Importe legendas na criação do projeto ou gere uma transcrição por IA.
               </div>
             )}
@@ -287,17 +270,12 @@ export function VideoWorkspace({ projectId }: { projectId: string }) {
           id="workspace-panel-chat"
           role="tabpanel"
           aria-labelledby="workspace-tab-chat"
-          className={`flex min-h-[28rem] max-h-[calc(100dvh-11rem)] flex-col overflow-hidden rounded-2xl border border-zinc-200 bg-white p-5 shadow-sm dark:border-zinc-800 dark:bg-zinc-900 lg:sticky lg:top-24 lg:max-h-[calc(100vh-7rem)] ${tab === "chat" ? "flex" : "hidden lg:flex"}`}
+          className={`surface-card surface-in flex min-h-[28rem] max-h-[calc(100dvh-11rem)] flex-col overflow-hidden p-5 lg:sticky lg:top-24 lg:max-h-[calc(100vh-7rem)] ${tab === "chat" ? "flex" : "hidden lg:flex"}`}
         >
           <ChatPanel key={project.id} project={project} onSeek={seekTo} />
         </aside>
       </div>
 
-      <div className="mt-6">
-        <PhaseNotice>
-          Fase 9: tema claro/escuro, estados de carregamento/erro, navegação por teclado e teste de provedor de chat.
-        </PhaseNotice>
-      </div>
     </AppShell>
   );
 }
