@@ -20,7 +20,7 @@ function highlightText(text: string, query: string) {
   return (
     <>
       {text.slice(0, index)}
-      <mark className="rounded bg-amber-200 px-0.5 text-inherit dark:bg-amber-500/40">
+      <mark className="rounded bg-brand/20 px-0.5 text-inherit">
         {text.slice(index, index + normalized.length)}
       </mark>
       {text.slice(index + normalized.length)}
@@ -41,16 +41,16 @@ export function TranscriptSegmentRow({
       onClick={() => onSeek(segment.start)}
       aria-label={`Ir para ${formatTimestamp(segment.start)}`}
       aria-current={active ? "true" : undefined}
-      className={`grid w-full grid-cols-[4.5rem_minmax(0,1fr)] gap-3 rounded-lg px-2 py-2 text-left text-sm transition focus-visible:outline-none ${
+      className={`grid w-full grid-cols-[4.5rem_minmax(0,1fr)] gap-3 rounded-lg px-2 py-2 text-left text-sm transition focus-visible:ring-2 focus-visible:ring-brand/30 focus-visible:outline-none ${
         active
-          ? "bg-violet-100 text-violet-950 dark:bg-violet-950/50 dark:text-violet-100"
-          : "hover:bg-zinc-100 dark:hover:bg-zinc-800/80"
+          ? "bg-brand/10 text-foreground ring-1 ring-brand/20"
+          : "hover:bg-muted/60"
       }`}
     >
-      <span className="font-mono text-xs text-zinc-500 dark:text-zinc-400">
+      <span className={`font-mono text-xs tabular-nums ${active ? "text-brand" : "text-muted-foreground"}`}>
         {formatTimestamp(segment.start)}
       </span>
-      <span className="leading-6 text-zinc-700 dark:text-zinc-300">
+      <span className="leading-6 text-foreground/90">
         {highlightText(segment.text, query)}
       </span>
     </button>
