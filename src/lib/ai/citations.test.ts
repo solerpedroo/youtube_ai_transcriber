@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { extractCitations, splitContentWithCitations } from "./citations";
+import { contentToMarkdownWithSeekLinks, extractCitations, splitContentWithCitations } from "./citations";
 
 describe("extractCitations", () => {
   it("parses minute and hour timestamps uniquely", () => {
@@ -7,6 +7,14 @@ describe("extractCitations", () => {
       { start: 751 },
       { start: 3_723 },
     ]);
+  });
+});
+
+describe("contentToMarkdownWithSeekLinks", () => {
+  it("converts timestamp markers into seek links", () => {
+    expect(contentToMarkdownWithSeekLinks("Veja [1:02:03] aqui.")).toBe(
+      "Veja [1:02:03](#seek-3723) aqui.",
+    );
   });
 });
 
