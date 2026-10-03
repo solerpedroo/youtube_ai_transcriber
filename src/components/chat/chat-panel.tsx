@@ -198,7 +198,7 @@ export function ChatPanel({ project, onSeek }: ChatPanelProps) {
   return (
     <div className="flex min-h-0 flex-1 flex-col">
       <div className="flex shrink-0 items-center gap-2">
-        <MessageSquareText className="size-4 text-brand" />
+        <MessageSquareText className="size-4 text-foreground/80" />
         <h2 className="font-semibold">Assistente de IA</h2>
       </div>
 
