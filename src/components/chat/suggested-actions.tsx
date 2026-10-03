@@ -17,6 +17,7 @@ export function SuggestedActions({ disabled, onSelect }: SuggestedActionsProps) 
           type="button"
           size="sm"
           variant="outline"
+          className="chip-suggestion h-8"
           disabled={disabled}
           onClick={() => onSelect(action.prompt)}
         >
