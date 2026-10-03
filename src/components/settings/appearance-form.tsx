@@ -15,7 +15,7 @@ export function AppearanceForm() {
   const hasHydrated = useSettingsStore((state) => state.hasHydrated);
 
   if (!hasHydrated) {
-    return <p className="text-sm text-zinc-500">Carregando preferência de tema...</p>;
+    return <p className="text-sm text-muted-foreground">Carregando preferência de tema...</p>;
   }
 
   return (
@@ -42,7 +42,7 @@ export function AppearanceForm() {
                 className="sr-only"
               />
               <span className="block text-sm font-medium">{option.label}</span>
-              <span className="mt-1 block text-xs leading-5 text-zinc-500 dark:text-zinc-400">
+              <span className="mt-1 block text-xs leading-5 text-muted-foreground">
                 {option.description}
               </span>
             </label>
