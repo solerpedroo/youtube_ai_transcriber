@@ -71,13 +71,13 @@ function createMarkdownComponents(onSeek?: (seconds: number) => void): Component
         return <code className={className}>{children}</code>;
       }
       return (
-        <code className="rounded bg-zinc-200/80 px-1 py-0.5 font-mono text-[0.85em] text-zinc-900 dark:bg-zinc-950/80 dark:text-zinc-100">
+        <code className="rounded bg-muted px-1 py-0.5 font-mono text-[0.85em] text-foreground">
           {children}
         </code>
       );
     },
     pre: ({ children }) => (
-      <pre className="mb-2 overflow-x-auto rounded-lg bg-zinc-200/70 p-3 font-mono text-xs leading-5 last:mb-0 dark:bg-zinc-950/80">
+      <pre className="mb-2 overflow-x-auto rounded-lg border border-border bg-muted/50 p-3 font-mono text-xs leading-5 last:mb-0">
         {children}
       </pre>
     ),
@@ -86,9 +86,9 @@ function createMarkdownComponents(onSeek?: (seconds: number) => void): Component
         <table className="w-full min-w-[16rem] border-collapse text-left text-xs">{children}</table>
       </div>
     ),
-    thead: ({ children }) => <thead className="border-b border-zinc-300 dark:border-zinc-600">{children}</thead>,
+    thead: ({ children }) => <thead className="border-b border-border">{children}</thead>,
     th: ({ children }) => <th className="px-2 py-1.5 font-semibold">{children}</th>,
-    td: ({ children }) => <td className="border-t border-zinc-200 px-2 py-1.5 dark:border-zinc-700">{children}</td>,
+    td: ({ children }) => <td className="border-t border-border px-2 py-1.5">{children}</td>,
   };
 }
 
