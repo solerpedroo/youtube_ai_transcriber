@@ -16,3 +16,11 @@ npm test
 npm run lint
 npm run build
 ```
+
+## Segurança (deploy exposto)
+
+- Chaves de API ficam em `sessionStorage` (não persistem no `localStorage` após salvar configurações).
+- Rotas `/api/*` aplicam rate limit, validação de origem (browser), limite de tamanho do JSON e `YouTubeUrlSchema` nas URLs.
+- Provedor **OpenAI-compatible**: use `OPENAI_COMPATIBLE_ALLOWED_HOSTS` (hosts separados por vírgula) e evite bases URL arbitrárias em produção.
+- Deploy público: defina `API_ACCESS_SECRET` e injete o header `x-api-access-secret` no proxy (a UI local não envia esse segredo).
+- Atrás de proxy confiável: `TRUST_PROXY=true` para rate limit usar `X-Forwarded-For`.
