@@ -28,6 +28,8 @@ export function HomeOverview() {
         description="Importe um link, aproveite legendas quando existirem e converse com o conteúdo — tudo salvo localmente no navegador."
       />
 
+      <ImportVideoCard />
+
       <div className="grid gap-3 sm:grid-cols-3">
         <StatCard
           label="Projetos"
@@ -52,8 +54,6 @@ export function HomeOverview() {
       </div>
 
       <QuickLinks />
-
-      <ImportVideoCard />
     </div>
   );
 }
