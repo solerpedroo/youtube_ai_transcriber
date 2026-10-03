@@ -17,13 +17,16 @@ export function AppSidebar() {
 
   return (
     <aside className="sidebar-chrome fixed inset-y-0 left-0 z-40 hidden w-[260px] flex-col border-r border-sidebar-border lg:flex">
-      <div className="flex h-16 items-center gap-2.5 border-b border-sidebar-border px-5">
+      <Link
+        href="/"
+        className="flex h-16 items-center gap-2.5 border-b border-sidebar-border px-5 transition-colors hover:bg-sidebar-accent/50"
+      >
         <BrandMark size="md" />
         <div className="min-w-0 leading-tight">
           <p className="truncate text-sm font-semibold tracking-tight">Transcriber</p>
           <p className="truncate text-[11px] text-muted-foreground">Vídeos · legendas · chat</p>
         </div>
-      </div>
+      </Link>
 
       <nav className="flex-1 space-y-1 px-3 py-4" aria-label="Navegação principal">
         <p className="sidebar-section-label px-3 pb-2">Workspace</p>
