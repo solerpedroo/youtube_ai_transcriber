@@ -1,13 +1,31 @@
 import type { VideoProject } from "@/types";
+import {
+  mergeApiKeysIntoSettings,
+  persistApiKeysFromSettings,
+  stripApiKeysFromSettings,
+} from "./api-keys-session";
 import { STORAGE_KEY, storageAdapter } from "./adapter";
 import { createDefaultAppState, migrateAppState, type PersistedAppState } from "./migrations";
 
 function readState(): PersistedAppState {
-  return migrateAppState(storageAdapter.get<unknown>(STORAGE_KEY, createDefaultAppState()));
+  const state = migrateAppState(storageAdapter.get<unknown>(STORAGE_KEY, createDefaultAppState()));
+  const merged = mergeApiKeysIntoSettings(state.settings);
+  const hadPersistedKeys =
+    state.settings.chatProvider.apiKey.trim().length > 0
+    || state.settings.transcriptionProvider.apiKey.trim().length > 0;
+  if (hadPersistedKeys) {
+    persistApiKeysFromSettings(merged);
+    storageAdapter.set(STORAGE_KEY, { ...state, settings: stripApiKeysFromSettings(merged) });
+  }
+  return { ...state, settings: merged };
 }
 
 function writeState(nextState: PersistedAppState): void {
-  storageAdapter.set(STORAGE_KEY, nextState);
+  persistApiKeysFromSettings(nextState.settings);
+  storageAdapter.set(STORAGE_KEY, {
+    ...nextState,
+    settings: stripApiKeysFromSettings(nextState.settings),
+  });
 }
 
 export function getProjects(): VideoProject[] {
