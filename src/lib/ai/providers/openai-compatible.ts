@@ -1,4 +1,6 @@
-import { AppError } from "@/lib/utils/errors";
+import { AppError, isAppError } from "@/lib/utils/errors";
+import { secureProviderHttpsFetch } from "@/lib/security/secure-fetch";
+import { validateOutboundHttpsBaseUrl } from "@/lib/security/outbound-url";
 import { assertChatCredentials, iterateSseDataLines, mapProviderHttpError } from "../http";
 import type { AIChatMessage, AIChatOptions, AIChatStreamEvent, AIProvider } from "../types";
 function toOpenAiMessages(messages: readonly AIChatMessage[]) {
@@ -18,9 +20,12 @@ export async function* streamOpenAiCompatibleChat(
     throw new AppError("CHAT_FAILED", "O chat foi cancelado.");
   }
 
+  const useSecureFetch = !endpoint.startsWith("https://api.openai.com/")
+    && !endpoint.startsWith("https://api.groq.com/");
+
   let response: Response;
   try {
-    response = await fetch(endpoint, {
+    const init: RequestInit = {
       method: "POST",
       headers: {
         Authorization: `Bearer ${options.apiKey}`,
@@ -32,8 +37,12 @@ export async function* streamOpenAiCompatibleChat(
         stream: true,
       }),
       signal: options.signal,
-    });
+    };
+    response = useSecureFetch
+      ? await secureProviderHttpsFetch(endpoint, init)
+      : await fetch(endpoint, init);
   } catch (error) {
+    if (isAppError(error)) throw error;
     if (options.signal?.aborted || (error instanceof Error && error.name === "AbortError")) {
       throw new AppError("CHAT_FAILED", "O chat foi cancelado.");
     }
@@ -71,7 +80,7 @@ export function createOpenAiCompatibleProvider(
     id,
     streamChat(messages, options) {
       const endpoint = options.baseUrl
-        ? `${options.baseUrl.replace(/\/$/, "")}/chat/completions`
+        ? `${validateOutboundHttpsBaseUrl(options.baseUrl)}/chat/completions`
         : defaultEndpoint;
       return streamOpenAiCompatibleChat(endpoint, messages, options);
     },
