@@ -1,5 +1,7 @@
 import type { ReactNode } from "react";
-import { Navigation } from "./navigation";
+import { AppSidebar } from "./app-sidebar";
+import { MobileNav } from "./mobile-nav";
+import { MobileTopBar } from "./mobile-top-bar";
 
 type AppShellProps = {
   children: ReactNode;
@@ -8,21 +10,30 @@ type AppShellProps = {
 
 export function AppShell({ children, compact = false }: AppShellProps) {
   return (
-    <div className="min-h-screen bg-zinc-50 text-zinc-950 selection:bg-violet-200 selection:text-violet-950 dark:bg-zinc-950 dark:text-zinc-50">
+    <div className="relative min-h-screen">
       <a
         href="#conteudo-principal"
-        className="sr-only focus:not-sr-only focus:absolute focus:left-4 focus:top-4 focus:z-50 focus:rounded-lg focus:bg-violet-600 focus:px-3 focus:py-2 focus:text-sm focus:font-medium focus:text-white"
+        className="sr-only focus:not-sr-only focus:absolute focus:left-4 focus:top-4 focus:z-50 focus:rounded-lg focus:bg-brand focus:px-3 focus:py-2 focus:text-sm focus:font-medium focus:text-brand-foreground"
       >
         Ir para o conteúdo
       </a>
-      <Navigation />
-      <main
-        id="conteudo-principal"
-        tabIndex={-1}
-        className={compact ? "mx-auto w-full max-w-7xl px-4 py-6 sm:px-6 lg:px-8" : "mx-auto w-full max-w-6xl px-4 py-12 sm:px-6 lg:px-8"}
-      >
-        {children}
-      </main>
+
+      <AppSidebar />
+
+      <div className="flex min-h-screen flex-col lg:pl-[260px]">
+        <MobileTopBar />
+        <main
+          id="conteudo-principal"
+          tabIndex={-1}
+          className={`relative flex-1 pb-nav ${compact ? "px-3 py-4 sm:px-5 lg:px-8 lg:py-6" : "px-3 py-6 sm:px-5 lg:px-8 lg:py-8"}`}
+        >
+          <div className="canvas-grid pointer-events-none absolute inset-x-0 top-0 h-72" aria-hidden />
+          <div className={`relative mx-auto w-full ${compact ? "max-w-7xl" : "max-w-5xl"}`}>
+            {children}
+          </div>
+        </main>
+        <MobileNav />
+      </div>
     </div>
   );
 }
