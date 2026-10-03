@@ -1,5 +1,7 @@
 # YouTube AI Transcriber
 
+Repositório: [github.com/solerpedroo/youtube_ai_transcriber](https://github.com/solerpedroo/youtube_ai_transcriber)
+
 Aplicação **local-first** para importar vídeos do YouTube, obter transcrições de qualidade e estudar o conteúdo com chat contextual sobre a transcrição. Projetos, legendas e preferências ficam no seu navegador; o servidor processa apenas o necessário (metadata, legendas, áudio temporário e chamadas aos provedores de IA que **você** configura.
 
 ---
@@ -77,7 +79,7 @@ Instale `yt-dlp` e `ffmpeg` no **PATH** da máquina que executa o Next.js (local
 ## Instalação e desenvolvimento
 
 ```powershell
-git clone <url-do-repositorio>
+git clone https://github.com/solerpedroo/youtube_ai_transcriber.git
 cd youtube_ai_transcriber
 npm install
 npm run dev
