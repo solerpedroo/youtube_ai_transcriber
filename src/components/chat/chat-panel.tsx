@@ -51,7 +51,10 @@ export function ChatPanel({ project, onSeek }: ChatPanelProps) {
   }, []);
 
   useEffect(() => {
-    listRef.current?.scrollTo({ top: listRef.current.scrollHeight, behavior: "smooth" });
+    listRef.current?.scrollTo({
+      top: listRef.current.scrollHeight,
+      behavior: isStreaming ? "auto" : "smooth",
+    });
   }, [messages, isStreaming]);
 
   useEffect(() => {
@@ -193,8 +196,8 @@ export function ChatPanel({ project, onSeek }: ChatPanelProps) {
   }
 
   return (
-    <div className="flex h-full min-h-[28rem] flex-col">
-      <div className="flex items-center gap-2">
+    <div className="flex min-h-0 flex-1 flex-col">
+      <div className="flex shrink-0 items-center gap-2">
         <MessageSquareText className="size-4 text-violet-600 dark:text-violet-400" />
         <h2 className="font-semibold">Assistente de IA</h2>
       </div>
@@ -218,25 +221,34 @@ export function ChatPanel({ project, onSeek }: ChatPanelProps) {
         </div>
       ) : (
         <>
-          <div ref={listRef} className="mt-4 flex-1 space-y-3 overflow-y-auto pr-1">
+          <div ref={listRef} className="mt-4 min-h-0 flex-1 space-y-3 overflow-y-auto overscroll-contain pr-1">
             {messages.length === 0 ? (
               <div className="rounded-xl border border-dashed border-zinc-300 p-4 text-sm text-zinc-500 dark:border-zinc-700">
                 Pergunte qualquer coisa sobre o vídeo ou use um atalho abaixo.
               </div>
             ) : (
-              messages.map((message) => (
-                <ChatMessageBubble key={message.id} message={message} onSeek={onSeek} />
+              messages.map((message, index) => (
+                <ChatMessageBubble
+                  key={message.id}
+                  message={message}
+                  onSeek={onSeek}
+                  isStreaming={
+                    isStreaming
+                    && message.role === "assistant"
+                    && index === messages.length - 1
+                  }
+                />
               ))
             )}
           </div>
 
           {error && (
-            <p className="mt-3 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700 dark:border-red-950 dark:bg-red-950/30 dark:text-red-300" role="alert">
+            <p className="mt-3 shrink-0 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700 dark:border-red-950 dark:bg-red-950/30 dark:text-red-300" role="alert">
               {error}
             </p>
           )}
 
-          <div className="mt-3 space-y-3">
+          <div className="mt-3 shrink-0 space-y-3">
             <SuggestedActions disabled={isStreaming} onSelect={(prompt) => void sendPrompt(prompt)} />
             <ChatInput
               disabled={!canChat}
