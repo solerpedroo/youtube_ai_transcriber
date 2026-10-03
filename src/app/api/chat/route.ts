@@ -2,6 +2,8 @@ import { z } from "zod";
 import { isAppError } from "@/lib/utils/errors";
 import { buildChatMessages } from "@/lib/ai/context-builder";
 import { getAIProvider } from "@/lib/ai/provider-factory";
+import { guardApiRequest, readJsonBodyWithLimit } from "@/lib/security/api-request-guard";
+import { validateOutboundHttpsBaseUrl } from "@/lib/security/outbound-url";
 import { AIProviderIdSchema } from "@/types";
 
 export const runtime = "nodejs";
@@ -9,14 +11,14 @@ export const maxDuration = 120;
 
 const ChatMessageSchema = z.object({
   role: z.enum(["user", "assistant"]),
-  content: z.string().trim().min(1).max(100_000),
+  content: z.string().trim().min(1).max(16_000),
 });
 
 const TranscriptSegmentSchema = z.object({
   id: z.string().min(1).optional(),
   start: z.number().finite().nonnegative(),
   end: z.number().finite().nonnegative(),
-  text: z.string().max(8_000),
+  text: z.string().max(2_000),
 }).refine((segment) => segment.end >= segment.start, {
   message: "O término do segmento deve ser posterior ao início.",
   path: ["end"],
@@ -28,9 +30,9 @@ const RequestSchema = z.object({
   model: z.string().trim().min(1).max(128),
   baseUrl: z.string().trim().url().optional(),
   videoTitle: z.string().trim().max(500).optional().default("Untitled video"),
-  transcriptText: z.string().max(100_000).optional(),
-  transcriptSegments: z.array(TranscriptSegmentSchema).max(50_000).optional(),
-  messages: z.array(ChatMessageSchema).min(1).max(40),
+  transcriptText: z.string().max(120_000).optional(),
+  transcriptSegments: z.array(TranscriptSegmentSchema).max(3_000).optional(),
+  messages: z.array(ChatMessageSchema).min(1).max(32),
 }).superRefine((value, context) => {
   if (value.provider === "openai-compatible" && !value.baseUrl) {
     context.addIssue({
@@ -45,6 +47,16 @@ const RequestSchema = z.object({
       path: ["baseUrl"],
       message: "A base URL deve usar HTTPS.",
     });
+    return;
+  }
+  if (value.baseUrl) {
+    try {
+      validateOutboundHttpsBaseUrl(value.baseUrl);
+    } catch (error) {
+      if (isAppError(error)) {
+        context.addIssue({ code: "custom", path: ["baseUrl"], message: error.message });
+      }
+    }
   }
 });
 
@@ -58,12 +70,12 @@ function encode(event: StreamEvent): string {
 }
 
 export async function POST(request: Request) {
-  let payload: unknown;
-  try {
-    payload = await request.json();
-  } catch {
-    return Response.json({ code: "CHAT_FAILED", message: "Envie um corpo JSON válido." }, { status: 400 });
-  }
+  const blocked = guardApiRequest(request, { profile: "chat", maxBodyBytes: 2_000_000 });
+  if (blocked) return blocked;
+
+  const parsedBody = await readJsonBodyWithLimit(request, 2_000_000);
+  if (!parsedBody.ok) return parsedBody.response;
+  const payload = parsedBody.payload;
 
   const body = RequestSchema.safeParse(payload);
   if (!body.success) {
