@@ -12,6 +12,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { SettingsField } from "@/components/settings/settings-field";
+import { StatusMessage } from "@/components/foundation/status-message";
 import { useSettingsStore } from "@/stores/settings-store";
 
 const PROVIDERS: Array<{ id: TranscriptionProviderId; label: string; models: string[] }> = [
@@ -108,7 +109,7 @@ export function TranscriptionSettingsForm() {
       </SettingsField>
       <div className="flex items-center gap-3">
         <Button type="submit">Salvar transcrição</Button>
-        {saved && <p className="text-sm text-emerald-700 dark:text-emerald-300">Preferências salvas localmente.</p>}
+        {saved && <StatusMessage tone="success" className="w-full sm:w-auto">Preferências salvas localmente.</StatusMessage>}
       </div>
     </form>
   );
