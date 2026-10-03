@@ -1,4 +1,9 @@
 import type { AppSettings } from "@/types";
+import {
+  mergeApiKeysIntoSettings,
+  persistApiKeysFromSettings,
+  stripApiKeysFromSettings,
+} from "./api-keys-session";
 import { STORAGE_KEY, storageAdapter } from "./adapter";
 import { createDefaultAppState, migrateAppState, type PersistedAppState } from "./migrations";
 
@@ -19,19 +24,30 @@ function migrateChatProviderSettings(settings: AppSettings): AppSettings {
 }
 
 function readState(): PersistedAppState {
-  return migrateAppState(storageAdapter.get<unknown>(STORAGE_KEY, createDefaultAppState()));
+  const state = migrateAppState(storageAdapter.get<unknown>(STORAGE_KEY, createDefaultAppState()));
+  const merged = mergeApiKeysIntoSettings(state.settings);
+  const hadPersistedKeys =
+    state.settings.chatProvider.apiKey.trim().length > 0
+    || state.settings.transcriptionProvider.apiKey.trim().length > 0;
+  if (hadPersistedKeys) {
+    persistApiKeysFromSettings(merged);
+    storageAdapter.set(STORAGE_KEY, { ...state, settings: stripApiKeysFromSettings(merged) });
+  }
+  return { ...state, settings: merged };
 }
 
 export function getSettings(): AppSettings {
   const state = readState();
   const settings = migrateChatProviderSettings(state.settings);
   if (settings !== state.settings) {
-    storageAdapter.set(STORAGE_KEY, { ...state, settings });
+    persistApiKeysFromSettings(settings);
+    storageAdapter.set(STORAGE_KEY, { ...state, settings: stripApiKeysFromSettings(settings) });
   }
   return settings;
 }
 
 export function saveSettings(settings: AppSettings): void {
   const state = readState();
-  storageAdapter.set(STORAGE_KEY, { ...state, settings });
+  persistApiKeysFromSettings(settings);
+  storageAdapter.set(STORAGE_KEY, { ...state, settings: stripApiKeysFromSettings(settings) });
 }
