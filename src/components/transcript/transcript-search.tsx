@@ -13,7 +13,7 @@ export function TranscriptSearch({ value, onChange, resultCount }: TranscriptSea
   return (
     <div className="flex items-center gap-2">
       <label className="relative flex min-w-0 flex-1 items-center">
-        <Search className="pointer-events-none absolute left-3 size-4 text-zinc-400" />
+        <Search className="pointer-events-none absolute left-3 size-4 text-muted-foreground" />
         <Input
           value={value}
           onChange={(event) => onChange(event.target.value)}
@@ -24,7 +24,7 @@ export function TranscriptSearch({ value, onChange, resultCount }: TranscriptSea
         {value && (
           <button
             type="button"
-            className="absolute right-2 rounded p-1 text-zinc-400 hover:text-zinc-700 dark:hover:text-zinc-200"
+            className="absolute right-2 rounded p-1 text-muted-foreground hover:text-foreground"
             onClick={() => onChange("")}
             aria-label="Limpar busca"
           >
@@ -33,7 +33,9 @@ export function TranscriptSearch({ value, onChange, resultCount }: TranscriptSea
         )}
       </label>
       {value.trim() && typeof resultCount === "number" && (
-        <span className="shrink-0 text-xs text-zinc-500">{resultCount} resultado{resultCount === 1 ? "" : "s"}</span>
+        <span className="shrink-0 rounded-full bg-brand/10 px-2 py-0.5 text-xs font-medium text-brand">
+          {resultCount} resultado{resultCount === 1 ? "" : "s"}
+        </span>
       )}
     </div>
   );
