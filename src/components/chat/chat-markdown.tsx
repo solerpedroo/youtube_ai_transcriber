@@ -5,6 +5,7 @@ import type { Components } from "react-markdown";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { contentToMarkdownWithSeekLinks } from "@/lib/ai/citations";
+import { sanitizeMarkdownHref } from "@/lib/security/markdown-link";
 import { StreamingCursor } from "@/components/chat/streaming-cursor";
 
 function parseSeekHref(href: string | undefined): number | null {
@@ -35,7 +36,11 @@ function createMarkdownComponents(onSeek?: (seconds: number) => void): Component
     ),
     hr: () => <hr className="my-3 border-border" />,
     a: ({ href, children }) => {
-      const seekSeconds = parseSeekHref(href);
+      const safeHref = sanitizeMarkdownHref(href);
+      if (!safeHref) {
+        return <span className="text-muted-foreground">{children}</span>;
+      }
+      const seekSeconds = parseSeekHref(safeHref);
       if (seekSeconds !== null) {
         if (!onSeek) {
           return <span className="font-medium text-brand">[{children}]</span>;
@@ -54,7 +59,7 @@ function createMarkdownComponents(onSeek?: (seconds: number) => void): Component
       }
       return (
         <a
-          href={href}
+          href={safeHref}
           target="_blank"
           rel="noreferrer noopener"
           className="font-medium text-brand underline decoration-brand/40 underline-offset-2 hover:text-brand/90"
@@ -108,7 +113,11 @@ export function ChatMarkdown({ content, onSeek, isStreaming = false }: ChatMarkd
 
   return (
     <div className="chat-markdown [&>*:first-child]:mt-0 [&>*:last-child]:mb-0">
-      <ReactMarkdown remarkPlugins={[remarkGfm]} components={components}>
+      <ReactMarkdown
+        remarkPlugins={[remarkGfm]}
+        components={components}
+        urlTransform={(url) => sanitizeMarkdownHref(url) ?? ""}
+      >
         {markdown}
       </ReactMarkdown>
       {isStreaming && <StreamingCursor />}
