@@ -52,7 +52,7 @@ export function ChatInput({ disabled, isStreaming, onSend, onStop }: ChatInputPr
           <LoaderCircle className="size-4 animate-spin" />Parar
         </Button>
       ) : (
-        <Button type="submit" disabled={disabled || !value.trim()}>
+        <Button type="submit" variant="brand" className="brand-glow" disabled={disabled || !value.trim()}>
           <SendHorizonal className="size-4" />Enviar
         </Button>
       )}
