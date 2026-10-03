@@ -28,7 +28,7 @@ export function Navigation() {
             const active = href === "/" ? pathname === href : pathname.startsWith(href);
             return (
               <Link
-                className={`flex items-center gap-2 rounded-lg px-2.5 py-2 text-sm font-medium transition-colors sm:px-3 ${active ? "bg-zinc-200 text-zinc-950 dark:bg-zinc-800 dark:text-zinc-50" : "text-zinc-600 hover:bg-zinc-200/70 hover:text-zinc-950 dark:text-zinc-400 dark:hover:bg-zinc-800 dark:hover:text-zinc-50"}`}
+                className={`flex items-center gap-2 rounded-lg px-2.5 py-2 text-sm font-medium transition-all duration-200 sm:px-3 ${active ? "bg-zinc-200 text-zinc-950 shadow-sm dark:bg-zinc-800 dark:text-zinc-50" : "text-zinc-600 hover:bg-zinc-200/70 hover:text-zinc-950 dark:text-zinc-400 dark:hover:bg-zinc-800 dark:hover:text-zinc-50"}`}
                 href={href}
                 key={href}
                 aria-current={active ? "page" : undefined}
