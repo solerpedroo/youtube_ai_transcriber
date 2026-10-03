@@ -1,49 +1,39 @@
 "use client";
 
 import type { ChatMessage } from "@/types";
-import { splitContentWithCitations } from "@/lib/ai/citations";
+import { ChatMarkdown } from "@/components/chat/chat-markdown";
+import { StreamingCursor } from "@/components/chat/streaming-cursor";
 
 type ChatMessageBubbleProps = {
   message: ChatMessage;
   onSeek?: (seconds: number) => void;
+  isStreaming?: boolean;
 };
 
-export function ChatMessageBubble({ message, onSeek }: ChatMessageBubbleProps) {
+export function ChatMessageBubble({ message, onSeek, isStreaming = false }: ChatMessageBubbleProps) {
   const isUser = message.role === "user";
-  const parts = isUser ? null : splitContentWithCitations(message.content || "…");
+  const assistantContent = message.content ?? "";
+  const isWaitingForFirstToken = !isUser && isStreaming && assistantContent.length === 0;
 
   return (
-    <div className={`flex ${isUser ? "justify-end" : "justify-start"}`}>
+    <div className={`chat-message-enter flex ${isUser ? "justify-end" : "justify-start"}`}>
       <div
-        className={`max-w-[92%] rounded-2xl px-3 py-2 text-sm leading-6 whitespace-pre-wrap ${
+        className={`max-w-[92%] rounded-2xl px-3 py-2 text-sm leading-6 ${
           isUser
-            ? "bg-violet-600 text-white"
-            : "bg-zinc-100 text-zinc-800 dark:bg-zinc-800 dark:text-zinc-100"
+            ? "whitespace-pre-wrap bg-violet-600 text-white"
+            : `break-words bg-zinc-100 text-zinc-800 dark:bg-zinc-800 dark:text-zinc-100 ${isStreaming ? "chat-streaming" : ""}`
         }`}
       >
-        {isUser || !parts ? (
-          message.content || (isUser ? "" : "…")
+        {isUser ? (
+          message.content
+        ) : isWaitingForFirstToken ? (
+          <StreamingCursor />
         ) : (
-          parts.map((part, index) => {
-            if (part.type === "text") {
-              return <span key={`text-${index}`}>{part.value}</span>;
-            }
-            if (!onSeek) {
-              return <span key={`cite-${index}`}>[{part.label}]</span>;
-            }
-            return (
-              <button
-                key={`cite-${index}`}
-                type="button"
-                onClick={() => onSeek(part.seconds)}
-                className="mx-0.5 inline rounded bg-violet-200 px-1 font-medium text-violet-900 hover:bg-violet-300 dark:bg-violet-900/60 dark:text-violet-100 dark:hover:bg-violet-800"
-                title={`Ir para ${part.label}`}
-                aria-label={`Ir para ${part.label}`}
-              >
-                [{part.label}]
-              </button>
-            );
-          })
+          <ChatMarkdown
+            content={assistantContent}
+            onSeek={onSeek}
+            isStreaming={isStreaming}
+          />
         )}
       </div>
     </div>
