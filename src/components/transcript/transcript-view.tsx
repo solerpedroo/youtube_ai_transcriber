@@ -47,7 +47,7 @@ export function TranscriptView({
 
       <div ref={listRef} className="min-h-0 flex-1 space-y-1 overflow-y-auto pr-1">
         {hits.length === 0 ? (
-          <p className="rounded-xl border border-dashed border-zinc-300 p-5 text-sm text-zinc-500 dark:border-zinc-700">
+          <p className="rounded-xl border border-dashed border-border p-5 text-sm text-muted-foreground">
             Nenhum segmento corresponde à busca.
           </p>
         ) : (
