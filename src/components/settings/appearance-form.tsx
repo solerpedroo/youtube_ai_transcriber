@@ -29,8 +29,8 @@ export function AppearanceForm() {
               key={option.id}
               className={`cursor-pointer rounded-xl border px-3 py-3 transition ${
                 selected
-                  ? "border-violet-500 bg-violet-50 ring-2 ring-violet-500/20 dark:border-violet-400 dark:bg-violet-950/40"
-                  : "border-zinc-200 bg-white hover:border-zinc-300 dark:border-zinc-700 dark:bg-zinc-950 dark:hover:border-zinc-600"
+                  ? "border-brand bg-brand/10 ring-2 ring-brand/20"
+                  : "border-border bg-card hover:border-brand/30"
               }`}
             >
               <input
