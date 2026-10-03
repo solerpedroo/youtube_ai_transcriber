@@ -4,7 +4,14 @@ import { useState, type FormEvent } from "react";
 import type { TranscriptionProviderId } from "@/types";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { Select } from "@/components/ui/select";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
+import { SettingsField } from "@/components/settings/settings-field";
 import { useSettingsStore } from "@/stores/settings-store";
 
 const PROVIDERS: Array<{ id: TranscriptionProviderId; label: string; models: string[] }> = [
@@ -24,30 +31,30 @@ export function TranscriptionSettingsForm() {
   function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     const form = new FormData(event.currentTarget);
-    const provider = String(form.get("provider") ?? "groq") as TranscriptionProviderId;
-    const model = String(form.get("model") ?? "").trim();
     const apiKey = String(form.get("apiKey") ?? "");
     updateSettings({
-      transcriptionProvider: { provider, model, apiKey },
+      transcriptionProvider: {
+        provider: current.provider,
+        model: current.model,
+        apiKey,
+      },
     });
     setSaved(true);
     window.setTimeout(() => setSaved(false), 2_000);
   }
 
   if (!hasHydrated) {
-    return <p className="text-sm text-zinc-500">Carregando preferências locais...</p>;
+    return <p className="text-sm text-muted-foreground">Carregando preferências locais...</p>;
   }
 
   return (
     <form className="space-y-4" onSubmit={handleSubmit}>
       <div className="grid gap-4 sm:grid-cols-2">
-        <label className="grid gap-1.5 text-sm">
-          <span className="font-medium">Provedor</span>
+        <SettingsField label="Provedor">
           <Select
-            name="provider"
-            defaultValue={current.provider}
-            onChange={(event) => {
-              const provider = event.target.value as TranscriptionProviderId;
+            value={current.provider}
+            onValueChange={(value) => {
+              const provider = value as TranscriptionProviderId;
               const models = PROVIDERS.find((item) => item.id === provider)?.models ?? [];
               updateSettings({
                 transcriptionProvider: {
@@ -58,28 +65,39 @@ export function TranscriptionSettingsForm() {
               });
             }}
           >
-            {PROVIDERS.map((provider) => (
-              <option key={provider.id} value={provider.id}>{provider.label}</option>
-            ))}
+            <SelectTrigger>
+              <SelectValue placeholder="Escolha o provedor" />
+            </SelectTrigger>
+            <SelectContent>
+              {PROVIDERS.map((provider) => (
+                <SelectItem key={provider.id} value={provider.id}>
+                  {provider.label}
+                </SelectItem>
+              ))}
+            </SelectContent>
           </Select>
-        </label>
-        <label className="grid gap-1.5 text-sm">
-          <span className="font-medium">Modelo</span>
+        </SettingsField>
+        <SettingsField label="Modelo">
           <Select
-            name="model"
             value={current.model}
-            onChange={(event) => updateSettings({
-              transcriptionProvider: { ...current, model: event.target.value },
+            onValueChange={(model) => updateSettings({
+              transcriptionProvider: { ...current, model },
             })}
           >
-            {providerMeta.models.map((model) => (
-              <option key={model} value={model}>{model}</option>
-            ))}
+            <SelectTrigger>
+              <SelectValue placeholder="Escolha o modelo" />
+            </SelectTrigger>
+            <SelectContent>
+              {providerMeta.models.map((model) => (
+                <SelectItem key={model} value={model}>
+                  {model}
+                </SelectItem>
+              ))}
+            </SelectContent>
           </Select>
-        </label>
+        </SettingsField>
       </div>
-      <label className="grid gap-1.5 text-sm">
-        <span className="font-medium">Chave de API</span>
+      <SettingsField label="Chave de API">
         <Input
           name="apiKey"
           type="password"
@@ -87,7 +105,7 @@ export function TranscriptionSettingsForm() {
           defaultValue={current.apiKey}
           placeholder="Armazenada apenas neste navegador"
         />
-      </label>
+      </SettingsField>
       <div className="flex items-center gap-3">
         <Button type="submit">Salvar transcrição</Button>
         {saved && <p className="text-sm text-emerald-700 dark:text-emerald-300">Preferências salvas localmente.</p>}
