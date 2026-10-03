@@ -1,13 +1,15 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
 import { isAppError } from "@/lib/utils/errors";
+import { guardApiRequest, readJsonBodyWithLimit } from "@/lib/security/api-request-guard";
 import { OptionalCookiesSchema } from "@/lib/youtube/cookies-schema";
 import { getVideoMetadata } from "@/lib/youtube/metadata";
+import { YouTubeUrlSchema } from "@/lib/youtube/url";
 
 export const runtime = "nodejs";
 
 const RequestSchema = z.object({
-  url: z.string().trim().min(1).max(2_048),
+  url: YouTubeUrlSchema,
   cookies: OptionalCookiesSchema,
 });
 
@@ -20,12 +22,12 @@ function statusForCode(code: string): number {
 }
 
 export async function POST(request: Request) {
-  let payload: unknown;
-  try {
-    payload = await request.json();
-  } catch {
-    return NextResponse.json({ code: "INVALID_URL", message: "Envie um corpo JSON válido." }, { status: 400 });
-  }
+  const blocked = guardApiRequest(request, { profile: "youtube", maxBodyBytes: 1_100_000 });
+  if (blocked) return blocked;
+
+  const parsedBody = await readJsonBodyWithLimit(request, 1_100_000);
+  if (!parsedBody.ok) return parsedBody.response;
+  const payload = parsedBody.payload;
 
   try {
     const body = RequestSchema.safeParse(payload);
@@ -40,7 +42,7 @@ export async function POST(request: Request) {
       return NextResponse.json({ code: "INVALID_URL", message: "Informe uma URL válida do YouTube." }, { status: 400 });
     }
 
-    return NextResponse.json(await getVideoMetadata(body.data.url, body.data.cookies));
+    return NextResponse.json(await getVideoMetadata(body.data.url.url, body.data.cookies));
   } catch (error) {
     if (isAppError(error)) {
       return NextResponse.json({ code: error.code, message: error.message }, { status: statusForCode(error.code) });
