@@ -29,22 +29,22 @@ function createMarkdownComponents(onSeek?: (seconds: number) => void): Component
     ol: ({ children }) => <ol className="mb-2 list-decimal space-y-1 pl-5 last:mb-0">{children}</ol>,
     li: ({ children }) => <li className="leading-6">{children}</li>,
     blockquote: ({ children }) => (
-      <blockquote className="mb-2 border-l-2 border-violet-400/70 pl-3 text-zinc-600 italic last:mb-0 dark:border-violet-500/60 dark:text-zinc-300">
+      <blockquote className="mb-2 border-l-2 border-brand/50 pl-3 text-muted-foreground italic last:mb-0">
         {children}
       </blockquote>
     ),
-    hr: () => <hr className="my-3 border-zinc-300 dark:border-zinc-600" />,
+    hr: () => <hr className="my-3 border-border" />,
     a: ({ href, children }) => {
       const seekSeconds = parseSeekHref(href);
       if (seekSeconds !== null) {
         if (!onSeek) {
-          return <span className="font-medium text-violet-700 dark:text-violet-300">[{children}]</span>;
+          return <span className="font-medium text-brand">[{children}]</span>;
         }
         return (
           <button
             type="button"
             onClick={() => onSeek(seekSeconds)}
-            className="mx-0.5 inline rounded bg-violet-200 px-1 font-medium text-violet-900 hover:bg-violet-300 dark:bg-violet-900/60 dark:text-violet-100 dark:hover:bg-violet-800"
+            className="mx-0.5 inline rounded bg-brand/15 px-1 font-medium text-brand hover:bg-brand/25"
             title={`Ir para ${String(children)}`}
             aria-label={`Ir para ${String(children)}`}
           >
@@ -57,13 +57,13 @@ function createMarkdownComponents(onSeek?: (seconds: number) => void): Component
           href={href}
           target="_blank"
           rel="noreferrer noopener"
-          className="font-medium text-violet-700 underline decoration-violet-400/60 underline-offset-2 hover:text-violet-800 dark:text-violet-300 dark:hover:text-violet-200"
+          className="font-medium text-brand underline decoration-brand/40 underline-offset-2 hover:text-brand/90"
         >
           {children}
         </a>
       );
     },
-    strong: ({ children }) => <strong className="font-semibold text-zinc-900 dark:text-zinc-50">{children}</strong>,
+    strong: ({ children }) => <strong className="font-semibold text-foreground">{children}</strong>,
     em: ({ children }) => <em className="italic">{children}</em>,
     code: ({ className, children }) => {
       const isBlock = Boolean(className?.includes("language-"));
