@@ -34,6 +34,15 @@ export type CitationPart =
   | { type: "citation"; seconds: number; label: string };
 
 /** Splits assistant content into text and clickable citation parts. */
+/** Turns [m:ss] markers into in-app seek links consumed by ChatMarkdown. */
+export function contentToMarkdownWithSeekLinks(content: string): string {
+  return content.replace(TIMESTAMP_PATTERN, (match, hours, minutes, seconds) => {
+    const label = match.slice(1, -1);
+    const seekSeconds = toSeconds(hours, minutes, seconds);
+    return `[${label}](#seek-${seekSeconds})`;
+  });
+}
+
 export function splitContentWithCitations(content: string): CitationPart[] {
   const parts: CitationPart[] = [];
   let lastIndex = 0;
