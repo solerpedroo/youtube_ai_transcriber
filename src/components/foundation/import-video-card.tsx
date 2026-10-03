@@ -120,23 +120,25 @@ export function ImportVideoCard() {
   }
 
   return (
-    <section className="relative overflow-hidden rounded-2xl border border-zinc-200 bg-white p-6 shadow-sm sm:p-10 dark:border-zinc-800 dark:bg-zinc-900">
-      <div className="pointer-events-none absolute -right-20 -top-24 size-64 rounded-full bg-violet-200/50 blur-3xl dark:bg-violet-950/30" />
+    <section className="surface-card surface-in relative overflow-hidden p-6 sm:p-8">
+      <div className="pointer-events-none absolute -right-20 -top-24 size-64 rounded-full bg-brand/15 blur-3xl" />
       <div className="relative mx-auto max-w-2xl">
-        <div className="mb-6 flex size-11 items-center justify-center rounded-xl bg-violet-100 text-violet-700 dark:bg-violet-950/50 dark:text-violet-300">
-          <Sparkles className="size-5" />
+        <div className="mb-5 flex items-center gap-3">
+          <span className="icon-tile grid size-10 place-items-center rounded-xl">
+            <Sparkles className="size-4 text-brand" />
+          </span>
+          <div>
+            <p className="label-caps text-brand">Nova importação</p>
+            <h2 className="text-lg font-semibold tracking-tight">Cole a URL do vídeo</h2>
+          </div>
         </div>
-        <p className="text-sm font-medium text-violet-700 dark:text-violet-300">Transcreva. Pesquise. Entenda.</p>
-        <h1 className="mt-2 text-balance text-3xl font-semibold tracking-tight sm:text-4xl">
-          Transforme vídeos do YouTube em conhecimento pesquisável.
-        </h1>
-        <p className="mt-4 max-w-xl text-pretty leading-7 text-zinc-600 dark:text-zinc-400">
-          Cole o link de um vídeo para verificar suas informações antes de criar uma transcrição.
+        <p className="max-w-xl text-pretty text-sm leading-6 text-muted-foreground">
+          Validamos o link, buscamos metadata e preferimos legendas existentes antes de transcrever áudio.
         </p>
         <form className="mt-8" onSubmit={handleSubmit}>
           <label className="sr-only" htmlFor="youtube-url">URL do vídeo do YouTube</label>
           <div className="flex flex-col gap-3 sm:flex-row">
-            <div className="flex h-12 flex-1 items-center gap-3 rounded-xl border border-zinc-300 bg-zinc-50 px-4 shadow-inner shadow-zinc-100 focus-within:border-violet-500 focus-within:ring-4 focus-within:ring-violet-500/10 dark:border-zinc-700 dark:bg-zinc-950 dark:shadow-none">
+            <div className="flex h-12 flex-1 items-center gap-3 rounded-xl border border-input bg-muted/40 px-4 shadow-inner focus-within:border-brand focus-within:ring-4 focus-within:ring-brand/15">
               <Link2 className="size-4 shrink-0 text-zinc-400" />
               <Input
                 id="youtube-url"
@@ -148,7 +150,7 @@ export function ImportVideoCard() {
                 className="h-auto min-w-0 flex-1 border-0 bg-transparent px-0 shadow-none focus-visible:border-0 focus-visible:ring-0"
               />
             </div>
-            <Button type="submit" size="lg" className="h-12 rounded-xl px-5" disabled={isLoading || isCreating}>
+            <Button type="submit" variant="brand" size="lg" className="h-12 rounded-xl px-5" disabled={isLoading || isCreating}>
               {isLoading ? <><LoaderCircle className="size-4 animate-spin" />Carregando</> : <>Importar vídeo <ArrowRight className="size-4" /></>}
             </Button>
           </div>
@@ -166,19 +168,19 @@ export function ImportVideoCard() {
           </div>
         )}
         {metadata && (
-          <div className="mt-6 overflow-hidden rounded-xl border border-zinc-200 bg-zinc-50 dark:border-zinc-800 dark:bg-zinc-950">
+          <div className="mt-6 overflow-hidden rounded-xl border border-border bg-muted/30">
             <div className="flex flex-col gap-4 p-4 sm:flex-row">
               {metadata.thumbnail && (
                 <img src={metadata.thumbnail} alt="Miniatura do vídeo" className="aspect-video w-full rounded-lg object-cover sm:w-44" />
               )}
               <div className="min-w-0 flex-1">
-                <p className="text-xs font-medium uppercase tracking-wide text-zinc-500">Vídeo encontrado</p>
+                <p className="label-caps">Vídeo encontrado</p>
                 <h2 className="mt-1 truncate font-semibold">{metadata.title}</h2>
-                <p className="mt-1 text-sm text-zinc-600 dark:text-zinc-400">
+                <p className="mt-1 text-sm text-muted-foreground">
                   {metadata.channel ?? "Canal não informado"} · {formatDuration(metadata.duration)}
                 </p>
                 <a
-                  className="mt-3 inline-flex items-center gap-1 text-xs text-violet-700 hover:underline dark:text-violet-300"
+                  className="mt-3 inline-flex items-center gap-1 text-xs text-brand hover:underline"
                   href={metadata.url}
                   target="_blank"
                   rel="noreferrer"
@@ -187,17 +189,17 @@ export function ImportVideoCard() {
                 </a>
               </div>
             </div>
-            <div className="flex justify-end gap-2 border-t border-zinc-200 p-3 dark:border-zinc-800">
+            <div className="flex justify-end gap-2 border-t border-border p-3">
               <Button type="button" variant="ghost" disabled={isCreating} onClick={() => setMetadata(null)}>
                 <X className="size-4" />Cancelar
               </Button>
-              <Button type="button" disabled={isCreating} onClick={() => void createProject()}>
+              <Button type="button" variant="brand" disabled={isCreating} onClick={() => void createProject()}>
                 {isCreating ? <><LoaderCircle className="size-4 animate-spin" />Buscando legendas</> : <>Criar projeto <ArrowRight className="size-4" /></>}
               </Button>
             </div>
           </div>
         )}
-        <div className="mt-5 flex items-start gap-2 text-xs leading-5 text-zinc-500 dark:text-zinc-400">
+        <div className="mt-5 flex items-start gap-2 text-xs leading-5 text-muted-foreground">
           <Info className="mt-0.5 size-3.5 shrink-0" />
           <p>
             Ao criar o projeto, legendas manuais ou automáticas existentes são preferidas antes da transcrição por áudio nas próximas fases.
