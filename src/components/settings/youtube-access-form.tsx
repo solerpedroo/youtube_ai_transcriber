@@ -36,8 +36,8 @@ export function YoutubeAccessForm() {
 
   return (
     <div className="space-y-3">
-      <p className="text-sm leading-6 text-zinc-600 dark:text-zinc-400">
-        Envie um <code className="rounded bg-zinc-100 px-1 dark:bg-zinc-800">cookies.txt</code> no formato Netscape
+      <p className="text-sm leading-6 text-muted-foreground">
+        Envie um <code className="rounded bg-muted px-1.5 py-0.5 font-mono text-xs">cookies.txt</code> no formato Netscape
         apenas para vídeos aos quais você tem acesso. O arquivo fica só nesta sessão do navegador — nunca no
         localStorage — e o servidor apaga a cópia temporária após cada job.
       </p>
@@ -69,7 +69,7 @@ export function YoutubeAccessForm() {
       )}
 
       {error && (
-        <p className="rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700 dark:border-red-950 dark:bg-red-950/30 dark:text-red-300" role="alert">
+        <p className="rounded-lg border border-destructive/30 bg-destructive/10 px-3 py-2 text-sm text-destructive" role="alert">
           {error}
         </p>
       )}
