@@ -4,93 +4,85 @@ import { TranscriptionSettingsForm } from "@/components/settings/transcription-s
 import { YoutubeAccessForm } from "@/components/settings/youtube-access-form";
 import { PhaseNotice } from "@/components/foundation/phase-notice";
 import { AppShell } from "@/components/layout/app-shell";
+import { PageHeader } from "@/components/layout/page-header";
+import type { ReactNode } from "react";
 import { Bot, KeyRound, Monitor, ShieldCheck, Video } from "lucide-react";
+
+function SettingsSection({
+  icon: Icon,
+  title,
+  description,
+  children,
+}: {
+  icon: typeof Bot;
+  title: string;
+  description?: string;
+  children: ReactNode;
+}) {
+  return (
+    <section className="surface-card hover-lift surface-in p-5 sm:p-6">
+      <div className="flex gap-4">
+        <span className="icon-tile grid size-10 shrink-0 place-items-center rounded-xl">
+          <Icon className="size-4 text-brand" />
+        </span>
+        <div className="min-w-0 flex-1">
+          <h2 className="font-medium">{title}</h2>
+          {description && (
+            <p className="mt-1 text-sm leading-6 text-muted-foreground">{description}</p>
+          )}
+          <div className="mt-4">{children}</div>
+        </div>
+      </div>
+    </section>
+  );
+}
 
 export default function SettingsPage() {
   return (
     <AppShell>
-      <div className="mx-auto max-w-3xl">
-        <p className="text-sm font-medium text-violet-700 dark:text-violet-300">Preferências locais</p>
-        <h1 className="mt-1 text-3xl font-semibold tracking-tight">Configurações</h1>
-        <p className="mt-2 text-zinc-600 dark:text-zinc-400">
-          Controle como o aplicativo processa e utiliza seus vídeos.
-        </p>
+      <PageHeader
+        label="Preferências locais"
+        title="Configurações"
+        description="Controle provedores de IA, transcrição e acesso ao YouTube. Tudo fica só neste navegador."
+      />
 
-        <div className="mt-8 overflow-hidden rounded-2xl border border-zinc-200 bg-white shadow-sm dark:border-zinc-800 dark:bg-zinc-900">
-          <section className="border-b border-zinc-100 p-5 dark:border-zinc-800">
-            <div className="flex gap-4">
-              <span className="grid size-9 shrink-0 place-items-center rounded-lg bg-zinc-100 text-zinc-600 dark:bg-zinc-800 dark:text-zinc-300">
-                <Bot className="size-4" />
-              </span>
-              <div className="min-w-0 flex-1">
-                <h2 className="font-medium">Provedor de IA</h2>
-                <p className="mt-1 text-sm leading-6 text-zinc-600 dark:text-zinc-400">
-                  Configure o provedor e modelo para o chat. A chave fica apenas neste navegador.
-                </p>
-                <div className="mt-4">
-                  <ChatSettingsForm />
-                </div>
-              </div>
-            </div>
-          </section>
+      <div className="space-y-4">
+        <SettingsSection
+          icon={Bot}
+          title="Provedor de chat"
+          description="Modelo e chave usados no assistente sobre a transcrição."
+        >
+          <ChatSettingsForm />
+        </SettingsSection>
 
-          <section className="border-b border-zinc-100 p-5 dark:border-zinc-800">
-            <div className="flex gap-4">
-              <span className="grid size-9 shrink-0 place-items-center rounded-lg bg-zinc-100 text-zinc-600 dark:bg-zinc-800 dark:text-zinc-300">
-                <KeyRound className="size-4" />
-              </span>
-              <div className="min-w-0 flex-1">
-                <h2 className="font-medium">Transcrição</h2>
-                <p className="mt-1 text-sm leading-6 text-zinc-600 dark:text-zinc-400">
-                  Escolha o provedor de speech-to-text e informe a chave de API usada apenas neste navegador.
-                </p>
-                <div className="mt-4">
-                  <TranscriptionSettingsForm />
-                </div>
-              </div>
-            </div>
-          </section>
+        <SettingsSection
+          icon={KeyRound}
+          title="Transcrição"
+          description="Speech-to-text quando não houver legendas utilizáveis no YouTube."
+        >
+          <TranscriptionSettingsForm />
+        </SettingsSection>
 
-          <section className="border-b border-zinc-100 p-5 dark:border-zinc-800">
-            <div className="flex gap-4">
-              <span className="grid size-9 shrink-0 place-items-center rounded-lg bg-zinc-100 text-zinc-600 dark:bg-zinc-800 dark:text-zinc-300">
-                <Video className="size-4" />
-              </span>
-              <div className="min-w-0 flex-1">
-                <h2 className="font-medium">Acesso ao YouTube</h2>
-                <div className="mt-4">
-                  <YoutubeAccessForm />
-                </div>
-              </div>
-            </div>
-          </section>
+        <SettingsSection icon={Video} title="Acesso ao YouTube">
+          <YoutubeAccessForm />
+        </SettingsSection>
 
-          <section className="p-5">
-            <div className="flex gap-4">
-              <span className="grid size-9 shrink-0 place-items-center rounded-lg bg-zinc-100 text-zinc-600 dark:bg-zinc-800 dark:text-zinc-300">
-                <Monitor className="size-4" />
-              </span>
-              <div className="min-w-0 flex-1">
-                <h2 className="font-medium">Aparência</h2>
-                <p className="mt-1 text-sm leading-6 text-zinc-600 dark:text-zinc-400">
-                  Escolha entre tema claro, escuro ou do sistema.
-                </p>
-                <div className="mt-4">
-                  <AppearanceForm />
-                </div>
-              </div>
-            </div>
-          </section>
-        </div>
+        <SettingsSection
+          icon={Monitor}
+          title="Aparência"
+          description="Tema claro, escuro ou conforme o sistema."
+        >
+          <AppearanceForm />
+        </SettingsSection>
+      </div>
 
-        <div className="mt-6">
-          <PhaseNotice>
-            <span className="inline-flex items-center gap-2">
-              <ShieldCheck className="size-4" />
-              Chaves e cookies ficam só no navegador (cookies só nesta sessão). O servidor nunca persiste cookies.txt.
-            </span>
-          </PhaseNotice>
-        </div>
+      <div className="mt-6">
+        <PhaseNotice>
+          <span className="inline-flex items-center gap-2">
+            <ShieldCheck className="size-4 text-brand" />
+            Chaves e cookies ficam só no navegador (cookies só nesta sessão). O servidor nunca persiste cookies.txt.
+          </span>
+        </PhaseNotice>
       </div>
     </AppShell>
   );
