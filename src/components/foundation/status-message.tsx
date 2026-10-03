@@ -7,10 +7,10 @@ type StatusMessageProps = {
 };
 
 const TONE_CLASS: Record<NonNullable<StatusMessageProps["tone"]>, string> = {
-  neutral: "border-zinc-200 bg-zinc-50 text-zinc-600 dark:border-zinc-800 dark:bg-zinc-950 dark:text-zinc-400",
-  loading: "border-zinc-200 bg-zinc-50 text-zinc-600 dark:border-zinc-800 dark:bg-zinc-950 dark:text-zinc-400",
-  error: "border-red-200 bg-red-50 text-red-700 dark:border-red-950 dark:bg-red-950/30 dark:text-red-300",
-  success: "border-emerald-200 bg-emerald-50 text-emerald-800 dark:border-emerald-950 dark:bg-emerald-950/30 dark:text-emerald-300",
+  neutral: "border-border bg-muted/40 text-muted-foreground",
+  loading: "border-brand/20 bg-brand/5 text-foreground",
+  error: "border-destructive/30 bg-destructive/10 text-destructive",
+  success: "border-emerald-500/30 bg-emerald-500/10 text-emerald-800 dark:text-emerald-300",
 };
 
 /** Compact status banner for loading, error, and empty helper copy. */
