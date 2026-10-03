@@ -12,30 +12,36 @@ type VideoHeaderProps = {
 
 export function VideoHeader({ metadata, statusLabel }: VideoHeaderProps) {
   return (
-    <div className="mb-6">
-      <Link href="/library" className="inline-flex items-center gap-2 text-sm text-zinc-600 hover:text-zinc-950 dark:text-zinc-400 dark:hover:text-white">
+    <header className="mb-6 border-b border-border/70 pb-6">
+      <Link
+        href="/library"
+        className="inline-flex items-center gap-2 text-sm text-muted-foreground transition-colors hover:text-foreground"
+      >
         <ArrowLeft className="size-4" />Biblioteca
       </Link>
       <div className="mt-4 flex flex-wrap items-end justify-between gap-3">
-        <div className="min-w-0">
-          <p className="text-xs font-medium uppercase tracking-wider text-zinc-500">Espaço de trabalho</p>
-          <h1 className="mt-1 truncate text-2xl font-semibold tracking-tight">{metadata.title}</h1>
-          <p className="mt-1 text-sm text-zinc-500">
-            {metadata.channel ?? "Canal não informado"} · {formatTimestamp(metadata.duration)}
-          </p>
-          <a
-            href={metadata.url}
-            target="_blank"
-            rel="noreferrer"
-            className="mt-2 inline-flex items-center gap-1 text-xs text-violet-700 hover:underline dark:text-violet-300"
-          >
-            Abrir no YouTube <ExternalLink className="size-3" />
-          </a>
+        <div className="flex min-w-0 gap-3">
+          <div className="mt-1 hidden h-9 w-1 shrink-0 rounded-full bg-brand sm:block" aria-hidden />
+          <div className="min-w-0">
+            <p className="label-caps">Espaço de trabalho</p>
+            <h1 className="text-display mt-1 truncate text-2xl font-semibold sm:text-3xl">{metadata.title}</h1>
+            <p className="mt-1 text-sm text-muted-foreground">
+              {metadata.channel ?? "Canal não informado"} · {formatTimestamp(metadata.duration)}
+            </p>
+            <a
+              href={metadata.url}
+              target="_blank"
+              rel="noreferrer"
+              className="mt-2 inline-flex items-center gap-1 text-xs text-brand hover:underline"
+            >
+              Abrir no YouTube <ExternalLink className="size-3" />
+            </a>
+          </div>
         </div>
-        <span className="rounded-full bg-violet-100 px-3 py-1 text-xs font-medium text-violet-800 dark:bg-violet-950/50 dark:text-violet-300">
+        <span className="rounded-full border border-brand/20 bg-brand/10 px-3 py-1 text-xs font-medium text-brand">
           {statusLabel}
         </span>
       </div>
-    </div>
+    </header>
   );
 }
