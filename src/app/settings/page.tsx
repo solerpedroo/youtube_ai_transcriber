@@ -2,7 +2,7 @@ import { AppearanceForm } from "@/components/settings/appearance-form";
 import { ChatSettingsForm } from "@/components/settings/chat-settings-form";
 import { TranscriptionSettingsForm } from "@/components/settings/transcription-settings-form";
 import { YoutubeAccessForm } from "@/components/settings/youtube-access-form";
-import { PhaseNotice } from "@/components/foundation/phase-notice";
+import { AppNotice } from "@/components/foundation/app-notice";
 import { AppShell } from "@/components/layout/app-shell";
 import { PageHeader } from "@/components/layout/page-header";
 import type { ReactNode } from "react";
@@ -77,12 +77,12 @@ export default function SettingsPage() {
       </div>
 
       <div className="mt-6">
-        <PhaseNotice>
+        <AppNotice>
           <span className="inline-flex items-center gap-2">
-            <ShieldCheck className="size-4 text-brand" />
+            <ShieldCheck className="size-4 shrink-0 text-brand" aria-hidden />
             Chaves e cookies ficam só no navegador (cookies só nesta sessão). O servidor nunca persiste cookies.txt.
           </span>
-        </PhaseNotice>
+        </AppNotice>
       </div>
     </AppShell>
   );
