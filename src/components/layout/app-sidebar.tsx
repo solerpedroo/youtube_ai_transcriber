@@ -2,7 +2,8 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { Library, Settings2, Sparkles, SquarePlay } from "lucide-react";
+import { Library, Settings2, SquarePlay } from "lucide-react";
+import { BrandMark } from "@/components/layout/brand-mark";
 import { SidebarStats } from "@/components/layout/sidebar-stats";
 
 const links = [
@@ -17,12 +18,10 @@ export function AppSidebar() {
   return (
     <aside className="sidebar-chrome fixed inset-y-0 left-0 z-40 hidden w-[260px] flex-col border-r border-sidebar-border lg:flex">
       <div className="flex h-16 items-center gap-2.5 border-b border-sidebar-border px-5">
-        <span className="icon-tile grid size-9 place-items-center rounded-xl">
-          <Sparkles className="size-4 text-brand" strokeWidth={2.2} />
-        </span>
+        <BrandMark size="md" />
         <div className="min-w-0 leading-tight">
-          <p className="truncate text-sm font-semibold tracking-tight">YouTube AI</p>
-          <p className="truncate text-[11px] text-muted-foreground">Transcriber</p>
+          <p className="truncate text-sm font-semibold tracking-tight">Transcriber</p>
+          <p className="truncate text-[11px] text-muted-foreground">Vídeos · legendas · chat</p>
         </div>
       </div>
 
