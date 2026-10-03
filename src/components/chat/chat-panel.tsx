@@ -192,38 +192,38 @@ export function ChatPanel({ project, onSeek }: ChatPanelProps) {
   }
 
   if (!hasHydratedSettings) {
-    return <p className="text-sm text-zinc-500">Carregando preferências do chat...</p>;
+    return <p className="text-sm text-muted-foreground">Carregando preferências do chat...</p>;
   }
 
   return (
     <div className="flex min-h-0 flex-1 flex-col">
       <div className="flex shrink-0 items-center gap-2">
-        <MessageSquareText className="size-4 text-violet-600 dark:text-violet-400" />
+        <MessageSquareText className="size-4 text-brand" />
         <h2 className="font-semibold">Assistente de IA</h2>
       </div>
 
       {!project.transcript ? (
         <div className="mt-5 flex flex-1 flex-col items-center justify-center text-center">
-          <span className="grid size-10 place-items-center rounded-xl bg-zinc-100 text-zinc-500 dark:bg-zinc-800">
+          <span className="icon-tile grid size-10 place-items-center rounded-xl">
             <Subtitles className="size-5" />
           </span>
           <p className="mt-4 text-sm font-medium">Transcrição necessária</p>
-          <p className="mt-2 text-sm leading-6 text-zinc-500">
+          <p className="mt-2 text-sm leading-6 text-muted-foreground">
             Importe legendas ou gere uma transcrição por IA para liberar o chat.
           </p>
         </div>
       ) : !chatProvider.apiKey.trim() ? (
         <div className="mt-5 flex flex-1 flex-col items-center justify-center text-center">
           <p className="text-sm font-medium">Configure um provedor de chat</p>
-          <p className="mt-2 text-sm leading-6 text-zinc-500">
-            Informe a chave de API em <Link href="/settings" className="text-violet-700 underline dark:text-violet-300">Configurações</Link>.
+          <p className="mt-2 text-sm leading-6 text-muted-foreground">
+            Informe a chave de API em <Link href="/settings" className="text-brand underline">Configurações</Link>.
           </p>
         </div>
       ) : (
         <>
           <div ref={listRef} className="mt-4 min-h-0 flex-1 space-y-3 overflow-y-auto overscroll-contain pr-1">
             {messages.length === 0 ? (
-              <div className="rounded-xl border border-dashed border-zinc-300 p-4 text-sm text-zinc-500 dark:border-zinc-700">
+              <div className="rounded-xl border border-dashed border-border p-4 text-sm text-muted-foreground">
                 Pergunte qualquer coisa sobre o vídeo ou use um atalho abaixo.
               </div>
             ) : (
