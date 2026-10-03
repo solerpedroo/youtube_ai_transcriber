@@ -8,6 +8,7 @@ import { extractCitations } from "@/lib/ai/citations";
 import { ChatInput } from "@/components/chat/chat-input";
 import { ChatMessageBubble } from "@/components/chat/chat-message";
 import { SuggestedActions } from "@/components/chat/suggested-actions";
+import { StatusMessage } from "@/components/foundation/status-message";
 import { useProjectStore } from "@/stores/project-store";
 import { useSettingsStore } from "@/stores/settings-store";
 
@@ -199,7 +200,7 @@ export function ChatPanel({ project, onSeek }: ChatPanelProps) {
     <div className="flex min-h-0 flex-1 flex-col">
       <div className="flex shrink-0 items-center gap-2">
         <MessageSquareText className="size-4 text-foreground/80" />
-        <h2 className="font-semibold">Assistente de IA</h2>
+        <h2 className="font-semibold">Chat sobre o vídeo</h2>
       </div>
 
       {!project.transcript ? (
@@ -209,7 +210,7 @@ export function ChatPanel({ project, onSeek }: ChatPanelProps) {
           </span>
           <p className="mt-4 text-sm font-medium">Transcrição necessária</p>
           <p className="mt-2 text-sm leading-6 text-muted-foreground">
-            Importe legendas ou gere uma transcrição por IA para liberar o chat.
+            Importe legendas ou transcreva o áudio para liberar o chat.
           </p>
         </div>
       ) : !chatProvider.apiKey.trim() ? (
@@ -243,9 +244,7 @@ export function ChatPanel({ project, onSeek }: ChatPanelProps) {
           </div>
 
           {error && (
-            <p className="mt-3 shrink-0 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700 dark:border-red-950 dark:bg-red-950/30 dark:text-red-300" role="alert">
-              {error}
-            </p>
+            <StatusMessage tone="error" className="mt-3 shrink-0">{error}</StatusMessage>
           )}
 
           <div className="mt-3 shrink-0 space-y-3">
