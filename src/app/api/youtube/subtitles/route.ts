@@ -7,6 +7,7 @@ import { extractSubtitles } from "@/lib/youtube/subtitles";
 import { YouTubeUrlSchema } from "@/lib/youtube/url";
 
 export const runtime = "nodejs";
+export const maxDuration = 120;
 
 const LanguageSchema = z.string().trim().regex(
   /^[A-Za-z]{2,3}(?:-[A-Za-z0-9]{2,8})?$/,
