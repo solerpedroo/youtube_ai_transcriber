@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, type ReactNode } from "react";
+import { OnboardingTour } from "@/components/onboarding/onboarding-tour";
 import { ThemeSync } from "@/components/providers/theme-sync";
 import { useProjectStore } from "@/stores/project-store";
 import { useSettingsStore } from "@/stores/settings-store";
@@ -18,6 +19,7 @@ export function AppProviders({ children }: { children: ReactNode }) {
   return (
     <>
       <ThemeSync />
+      <OnboardingTour />
       {children}
     </>
   );
