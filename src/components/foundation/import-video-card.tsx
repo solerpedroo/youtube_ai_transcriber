@@ -121,7 +121,10 @@ export function ImportVideoCard() {
   }
 
   return (
-    <section className="surface-card surface-in relative overflow-hidden p-6 sm:p-8">
+    <section
+      className="surface-card surface-in relative overflow-hidden p-6 sm:p-8"
+      data-onboarding="import-video"
+    >
       <div className="pointer-events-none absolute -right-24 -top-28 size-72 rounded-full bg-brand/8 blur-3xl" aria-hidden />
       <div className="relative mx-auto max-w-2xl">
         <div className="mb-5 flex items-center gap-3">
