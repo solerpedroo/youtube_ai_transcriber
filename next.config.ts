@@ -6,12 +6,12 @@ const contentSecurityPolicy = [
   "form-action 'self'",
   "frame-ancestors 'none'",
   "object-src 'none'",
-  "script-src 'self' 'unsafe-inline' 'unsafe-eval'",
+  "script-src 'self' 'unsafe-inline' 'unsafe-eval' https://www.youtube.com https://www.youtube-nocookie.com https://s.ytimg.com",
   "style-src 'self' 'unsafe-inline'",
   "img-src 'self' data: blob: https:",
   "font-src 'self' data:",
-  "connect-src 'self'",
-  "media-src 'self' blob:",
+  "connect-src 'self' https://www.youtube.com https://www.google.com https://*.googlevideo.com",
+  "media-src 'self' blob: https:",
   "frame-src https://www.youtube.com https://www.youtube-nocookie.com",
 ].join("; ");
 
