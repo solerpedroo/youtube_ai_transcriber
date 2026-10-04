@@ -1,11 +1,12 @@
 import { access } from "node:fs/promises";
 import { AppError } from "@/lib/utils/errors";
 import { runProcess } from "./process";
+import { getFfmpegCommand, getFfprobeCommand } from "./tool-paths";
 
 /** Internal wrapper for the Phase 4 audio workflow. Arguments are never browser-provided. */
 export async function normalizeAudio(inputPath: string, outputPath: string): Promise<void> {
   await runProcess(
-    "ffmpeg",
+    getFfmpegCommand(),
     [
       "-y",
       "-i", inputPath,
@@ -33,7 +34,7 @@ export async function probeAudioDurationSeconds(filePath: string): Promise<numbe
   }
 
   const result = await runProcess(
-    "ffprobe",
+    getFfprobeCommand(),
     ["-v", "error", "-show_entries", "format=duration", "-of", "csv=p=0", filePath],
     {
       unavailableCode: "FFMPEG_UNAVAILABLE",
