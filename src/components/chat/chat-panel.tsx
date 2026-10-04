@@ -1,8 +1,11 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import Link from "next/link";
-import { MessageSquareText, Subtitles } from "lucide-react";
+import { Maximize2, MessageSquareText, Minimize2, Subtitles } from "lucide-react";
+import { cn } from "cn";
+import { Button } from "@/components/ui/button";
 import type { ChatMessage, Conversation, VideoProject } from "@/types";
 import { extractCitations } from "@/lib/ai/citations";
 import { ChatInput } from "@/components/chat/chat-input";
@@ -41,32 +44,50 @@ export function ChatPanel({ project, onSeek }: ChatPanelProps) {
   const [messages, setMessages] = useState<ChatMessage[]>(() => existing?.messages ?? []);
   const [error, setError] = useState<string | null>(null);
   const [isStreaming, setIsStreaming] = useState(false);
+  const [isFullscreen, setIsFullscreen] = useState(false);
+  const [mounted, setMounted] = useState(false);
   const abortRef = useRef<AbortController | null>(null);
   const listRef = useRef<HTMLDivElement | null>(null);
   const createdAtRef = useRef(existing?.createdAt ?? new Date().toISOString());
 
   const canChat = Boolean(project.transcript && chatProvider.apiKey.trim());
 
+  useEffect(() => {
+    setMounted(true);
+  }, []);
+
   useEffect(() => () => {
     abortRef.current?.abort();
   }, []);
 
   useEffect(() => {
+    if (!isFullscreen) return;
+    const previous = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+    return () => {
+      document.body.style.overflow = previous;
+    };
+  }, [isFullscreen]);
+
+  useEffect(() => {
     listRef.current?.scrollTo({
       top: listRef.current.scrollHeight,
-      behavior: isStreaming ? "auto" : "smooth",
+      behavior: "smooth",
     });
   }, [messages, isStreaming]);
 
   useEffect(() => {
     function onKeyDown(event: KeyboardEvent) {
-      if (event.key === "Escape" && abortRef.current) {
-        abortRef.current.abort();
+      if (event.key !== "Escape") return;
+      if (isFullscreen) {
+        setIsFullscreen(false);
+        return;
       }
+      if (abortRef.current) abortRef.current.abort();
     }
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
-  }, []);
+  }, [isFullscreen]);
 
   function persist(nextMessages: ChatMessage[]) {
     const now = new Date().toISOString();
@@ -196,11 +217,27 @@ export function ChatPanel({ project, onSeek }: ChatPanelProps) {
     return <p className="text-sm text-muted-foreground">Carregando preferências do chat...</p>;
   }
 
-  return (
-    <div className="flex min-h-0 flex-1 flex-col">
-      <div className="flex shrink-0 items-center gap-2">
-        <MessageSquareText className="size-4 text-foreground/80" />
-        <h2 className="font-semibold">Chat sobre o vídeo</h2>
+  const panelBody = (
+    <>
+      <div className="flex shrink-0 items-center justify-between gap-3">
+        <div className="flex min-w-0 items-center gap-2">
+          <MessageSquareText className="size-4 shrink-0 text-foreground/80" />
+          <h2 className="truncate font-semibold">Chat sobre o vídeo</h2>
+        </div>
+        {project.transcript && chatProvider.apiKey.trim() && (
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            className="shrink-0"
+            aria-label={isFullscreen ? "Sair da tela cheia" : "Abrir chat em tela cheia"}
+            aria-pressed={isFullscreen}
+            onClick={() => setIsFullscreen((value) => !value)}
+          >
+            {isFullscreen ? <Minimize2 className="size-4" /> : <Maximize2 className="size-4" />}
+            <span className="hidden sm:inline">{isFullscreen ? "Sair" : "Tela cheia"}</span>
+          </Button>
+        )}
       </div>
 
       {!project.transcript ? (
@@ -222,7 +259,10 @@ export function ChatPanel({ project, onSeek }: ChatPanelProps) {
         </div>
       ) : (
         <>
-          <div ref={listRef} className="mt-4 min-h-0 flex-1 space-y-3 overflow-y-auto overscroll-contain pr-1">
+          <div
+            ref={listRef}
+            className="mt-4 min-h-0 flex-1 space-y-3 overflow-y-auto overscroll-contain scroll-smooth pr-1"
+          >
             {messages.length === 0 ? (
               <div className="rounded-xl border border-dashed border-border p-4 text-sm text-muted-foreground">
                 Pergunte qualquer coisa sobre o vídeo ou use um atalho abaixo.
@@ -258,6 +298,29 @@ export function ChatPanel({ project, onSeek }: ChatPanelProps) {
           </div>
         </>
       )}
-    </div>
+    </>
   );
+
+  const shellClass = cn(
+    "flex min-h-0 flex-1 flex-col",
+    isFullscreen && "fixed inset-0 z-[85] bg-background p-4 sm:p-6",
+  );
+
+  const panel = <div className={shellClass}>{panelBody}</div>;
+
+  if (isFullscreen && mounted) {
+    return createPortal(
+      <>
+        <div
+          className="fixed inset-0 z-[84] bg-background/80 backdrop-blur-sm"
+          aria-hidden
+          onClick={() => setIsFullscreen(false)}
+        />
+        {panel}
+      </>,
+      document.body,
+    );
+  }
+
+  return panel;
 }
