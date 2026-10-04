@@ -25,7 +25,7 @@ export function AppShell({ children, compact = false }: AppShellProps) {
         <main
           id="conteudo-principal"
           tabIndex={-1}
-          className={`relative flex-1 pb-nav ${compact ? "px-3 py-4 sm:px-5 lg:px-8 lg:py-6" : "px-3 py-6 sm:px-5 lg:px-8 lg:py-8"}`}
+          className={`relative flex-1 scroll-smooth pb-nav ${compact ? "px-3 py-4 sm:px-5 lg:px-8 lg:py-6" : "px-3 py-6 sm:px-5 lg:px-8 lg:py-8"}`}
         >
           <div className="canvas-grid pointer-events-none absolute inset-x-0 top-0 h-72" aria-hidden />
           <div className={`relative mx-auto w-full ${compact ? "max-w-7xl" : "max-w-5xl"}`}>
