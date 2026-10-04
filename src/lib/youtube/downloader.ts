@@ -2,6 +2,7 @@ import { readdir } from "node:fs/promises";
 import { join } from "node:path";
 import { AppError } from "@/lib/utils/errors";
 import { withCookiesArg, writeCookiesFile } from "./cookies";
+import { getYtDlpCommand } from "./tool-paths";
 import { runProcess } from "./process";
 import { YouTubeUrlSchema } from "./url";
 
@@ -61,7 +62,7 @@ export async function extractAudio(
 
   try {
     await runProcess(
-      "yt-dlp",
+      getYtDlpCommand(),
       withCookiesArg([
         "-f", "bestaudio/bestaudio*/best",
         "--no-playlist",
