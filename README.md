@@ -72,7 +72,9 @@ URL YouTube
 | **yt-dlp** | Metadata e legendas do YouTube |
 | **ffmpeg** e **ffprobe** | Normalização e chunking de áudio para transcrição |
 
-Instale `yt-dlp` e `ffmpeg` no **PATH** da máquina que executa o Next.js (local ou servidor de deploy).
+**Desenvolvimento local:** instale `yt-dlp` e `ffmpeg`/`ffprobe` no **PATH** (ou deixe o npm usar os pacotes `yt-dlp-exec`, `ffmpeg-static` e `ffprobe-static` após `npm install`).
+
+**Vercel:** o repositório já inclui esses pacotes e `vercel.json` com limites de duração/memória das funções — veja [Deploy na Vercel](#deploy-na-vercel).
 
 ---
 
@@ -104,9 +106,24 @@ Em **Configurações**, informe:
 
 ---
 
+## Deploy na Vercel
+
+1. Importe o repositório [github.com/solerpedroo/youtube_ai_transcriber](https://github.com/solerpedroo/youtube_ai_transcriber) em [vercel.com/new](https://vercel.com/new) (Framework Preset: **Next.js**).
+2. **Node.js 20+** — a Vercel detecta `engines` no `package.json`.
+3. Variáveis de ambiente: copie de [`.env.example`](.env.example) para **Settings → Environment Variables** (Production e Preview, se quiser).
+4. **Plano Pro (recomendado)** para transcrição longa:
+   - `/api/transcription/start` usa até **300 s** (`maxDuration` + `vercel.json`).
+   - No Hobby, o teto da Vercel para funções serverless é menor — importação com legendas costuma funcionar; transcrição por áudio pode estourar tempo em vídeos longos.
+5. **Deploy público:** defina `API_ACCESS_SECRET` e coloque um proxy (Cloudflare Worker, etc.) que injete `x-api-access-secret`, **ou** aceite que a UI browser-only depende do guard de origem + rate limit (ver Segurança).
+6. Após o deploy, abra a URL, conclua o **tour de onboarding** e configure chaves em **Configurações**.
+
+O build baixa o binário do **yt-dlp** via `postinstall` do `yt-dlp-exec` e empacota **ffmpeg/ffprobe** estáticos para Linux na função Node.
+
+---
+
 ## Variáveis de ambiente (opcional)
 
-Crie um `.env.local` na raiz quando for deploy ou hardening extra:
+Crie um `.env.local` na raiz (dev) ou configure no painel da Vercel — referência em [`.env.example`](.env.example):
 
 | Variável | Descrição |
 |----------|-----------|
