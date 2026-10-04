@@ -1,0 +1,24 @@
+{
+  "$schema": "https://openapi.vercel.sh/vercel.json",
+  "framework": "nextjs",
+  "buildCommand": "npm run build",
+  "installCommand": "npm install",
+  "functions": {
+    "src/app/api/transcription/start/route.ts": {
+      "maxDuration": 300,
+      "memory": 1024
+    },
+    "src/app/api/chat/route.ts": {
+      "maxDuration": 120,
+      "memory": 512
+    },
+    "src/app/api/youtube/metadata/route.ts": {
+      "maxDuration": 60,
+      "memory": 512
+    },
+    "src/app/api/youtube/subtitles/route.ts": {
+      "maxDuration": 120,
+      "memory": 512
+    }
+  }
+}
