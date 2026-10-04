@@ -5,6 +5,7 @@ import type { Transcript, TranscriptSegment } from "@/types";
 import { AppError } from "@/lib/utils/errors";
 import { buildFullText, normalizeSubtitleSegments } from "./normalize-segments";
 import { withCookiesArg, writeCookiesFile } from "./cookies";
+import { getYtDlpCommand } from "./tool-paths";
 import { runProcess } from "./process";
 import type { SelectedSubtitle, SubtitleKind, SubtitleTrack } from "./subtitle-types";
 import { createJobDirectory, removeJobDirectory } from "./temp";
@@ -145,7 +146,7 @@ async function downloadSubtitleFile(
   const writeFlag = selected.kind === "manual" ? "--write-subs" : "--write-auto-subs";
   try {
     await runProcess(
-      "yt-dlp",
+      getYtDlpCommand(),
       withCookiesArg([
         "--skip-download",
         "--no-playlist",
@@ -178,7 +179,7 @@ export async function detectSubtitleTracks(
   let result;
   try {
     result = await runProcess(
-      "yt-dlp",
+      getYtDlpCommand(),
       withCookiesArg(
         ["--dump-single-json", "--skip-download", "--no-playlist", urlResult.data.url],
         cookiesPath,
