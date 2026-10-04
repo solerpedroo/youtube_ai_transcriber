@@ -16,6 +16,16 @@ const contentSecurityPolicy = [
 ].join("; ");
 
 const nextConfig: NextConfig = {
+  serverExternalPackages: ["ffmpeg-static", "ffprobe-static", "yt-dlp-exec"],
+  outputFileTracingIncludes: {
+    "/api/youtube/metadata": ["./node_modules/yt-dlp-exec/bin/**"],
+    "/api/youtube/subtitles": ["./node_modules/yt-dlp-exec/bin/**"],
+    "/api/transcription/start": [
+      "./node_modules/yt-dlp-exec/bin/**",
+      "./node_modules/ffmpeg-static/**",
+      "./node_modules/ffprobe-static/**",
+    ],
+  },
   async headers() {
     return [
       {
