@@ -1,3 +1,4 @@
+import { OnboardingRestartLink } from "@/components/onboarding/onboarding-restart-link";
 import { AppearanceForm } from "@/components/settings/appearance-form";
 import { ChatSettingsForm } from "@/components/settings/chat-settings-form";
 import { TranscriptionSettingsForm } from "@/components/settings/transcription-settings-form";
@@ -47,25 +48,29 @@ export default function SettingsPage() {
       />
 
       <div className="space-y-4">
-        <SettingsSection
-          icon={MessageSquareText}
-          title="Provedor de chat"
-          description="Modelo e chave usados no assistente sobre a transcrição."
-        >
-          <ChatSettingsForm />
-        </SettingsSection>
+        <div id="onboarding-api-keys" className="scroll-mt-28 space-y-4">
+          <SettingsSection
+            icon={MessageSquareText}
+            title="Provedor de chat"
+            description="Modelo e chave usados no assistente sobre a transcrição."
+          >
+            <ChatSettingsForm />
+          </SettingsSection>
 
-        <SettingsSection
-          icon={KeyRound}
-          title="Transcrição"
-          description="Speech-to-text quando não houver legendas utilizáveis no YouTube."
-        >
-          <TranscriptionSettingsForm />
-        </SettingsSection>
+          <SettingsSection
+            icon={KeyRound}
+            title="Transcrição"
+            description="Speech-to-text quando não houver legendas utilizáveis no YouTube."
+          >
+            <TranscriptionSettingsForm />
+          </SettingsSection>
+        </div>
 
-        <SettingsSection icon={Video} title="Acesso ao YouTube">
-          <YoutubeAccessForm />
-        </SettingsSection>
+        <div id="onboarding-youtube" className="scroll-mt-28">
+          <SettingsSection icon={Video} title="Acesso ao YouTube">
+            <YoutubeAccessForm />
+          </SettingsSection>
+        </div>
 
         <SettingsSection
           icon={Monitor}
@@ -76,7 +81,8 @@ export default function SettingsPage() {
         </SettingsSection>
       </div>
 
-      <div className="mt-6">
+      <div className="mt-6 space-y-3">
+        <OnboardingRestartLink />
         <AppNotice>
           <span className="inline-flex items-center gap-2">
             <ShieldCheck className="size-4 shrink-0 text-brand" aria-hidden />
