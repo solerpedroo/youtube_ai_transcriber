@@ -7,6 +7,7 @@ import { getVideoMetadata } from "@/lib/youtube/metadata";
 import { YouTubeUrlSchema } from "@/lib/youtube/url";
 
 export const runtime = "nodejs";
+export const maxDuration = 60;
 
 const RequestSchema = z.object({
   url: YouTubeUrlSchema,
