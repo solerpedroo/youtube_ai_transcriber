@@ -171,6 +171,9 @@
   .chip-suggestion {
     @apply rounded-full border-border/80 bg-muted/35 text-xs hover:bg-muted/60 hover:border-brand/25;
   }
+  .onboarding-highlight-ring {
+    @apply relative z-[90] rounded-xl ring-4 ring-brand/35 ring-offset-2 ring-offset-background transition-shadow duration-300;
+  }
   .sidebar-section-label {
     @apply text-[10px] font-semibold uppercase tracking-[0.14em] text-muted-foreground/90;
   }
