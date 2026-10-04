@@ -45,14 +45,37 @@ export function loadYoutubeIframeApi(): Promise<YoutubeIframeApi> {
   if (apiPromise) return apiPromise;
 
   apiPromise = new Promise((resolve, reject) => {
-    const previous = window.onYouTubeIframeAPIReady;
-    window.onYouTubeIframeAPIReady = () => {
-      previous?.();
+    const settleReady = () => {
       if (window.YT?.Player) resolve(window.YT);
       else reject(new Error("YouTube IFrame API indisponível."));
     };
 
-    if (document.querySelector('script[data-youtube-iframe-api="true"]')) return;
+    const previous = window.onYouTubeIframeAPIReady;
+    window.onYouTubeIframeAPIReady = () => {
+      previous?.();
+      settleReady();
+    };
+
+    const existingScript = document.querySelector('script[data-youtube-iframe-api="true"]');
+    if (existingScript) {
+      if (window.YT?.Player) {
+        settleReady();
+        return;
+      }
+      const waitTimer = window.setInterval(() => {
+        if (window.YT?.Player) {
+          window.clearInterval(waitTimer);
+          settleReady();
+        }
+      }, 50);
+      window.setTimeout(() => {
+        window.clearInterval(waitTimer);
+        if (!window.YT?.Player) {
+          reject(new Error("Não foi possível carregar a YouTube IFrame API."));
+        }
+      }, 15_000);
+      return;
+    }
 
     const script = document.createElement("script");
     script.src = "https://www.youtube.com/iframe_api";
