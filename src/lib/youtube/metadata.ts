@@ -2,6 +2,7 @@ import { z } from "zod";
 import type { VideoMetadata } from "@/types";
 import { AppError } from "@/lib/utils/errors";
 import { withCookiesArg, withTemporaryCookies } from "./cookies";
+import { getYtDlpCommand } from "./tool-paths";
 import { runProcess } from "./process";
 import { YouTubeUrlSchema } from "./url";
 
@@ -58,7 +59,7 @@ export async function getVideoMetadata(inputUrl: string, cookiesText?: string): 
     let result;
     try {
       result = await runProcess(
-        "yt-dlp",
+        getYtDlpCommand(),
         withCookiesArg(["--dump-single-json", "--skip-download", "--no-playlist", validated.url], cookiesPath),
         { unavailableCode: "YTDLP_UNAVAILABLE" },
       );
